@@ -5,15 +5,26 @@ import { Elements } from "@stripe/react-stripe-js";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ProductCheckoutForm from "@/components/product-checkout-form";
+import SessionUploadForm from "@/components/session-upload-form";
 import { useControlCenterContent } from "@/hooks/use-control-center-content";
 import { getReadyServiceProducts } from "@/lib/store-product-utils";
 import { stripePromise } from "@/lib/stripe-client";
+
+interface CheckoutClientState {
+  fullName: string;
+  email: string;
+  paymentIntentId?: string;
+}
 
 export default function ServiceTierCheckout() {
   const searchParams = useSearchParams();
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState("");
   const [configError, setConfigError] = useState("");
+  const [checkoutClient, setCheckoutClient] = useState<CheckoutClientState>({
+    fullName: "",
+    email: "",
+  });
   const { products, settings } = useControlCenterContent();
 
   useEffect(() => {
@@ -74,14 +85,14 @@ export default function ServiceTierCheckout() {
             <div className="service-highlight-strip">
               <span>Tiered Pricing</span>
               <span>Stripe Checkout</span>
-              <span>Artist Follow-Up</span>
+              <span>Client Upload Portal</span>
             </div>
             <div className="service-hero-note" data-parallax="0.06">
               <p className="eyebrow">What Happens Next</p>
               <h3>Checkout holds your slot.</h3>
               <p>
-                After payment, you’ll follow up by email with stems, references, and any notes for
-                the session.
+                After payment, the artist can upload stems, beats, references, and session notes
+                right from this page.
               </p>
             </div>
           </div>
@@ -173,17 +184,31 @@ export default function ServiceTierCheckout() {
                   </ul>
 
                   <p className="service-checkout-note">
-                    Checkout covers the selected tier. You’ll send stems, reference tracks, and any
-                    notes after payment so the session can start cleanly.
+                    Checkout covers the selected tier. Once payment clears, use the upload portal
+                    below to send stems, beats, references, and mix notes in one pass.
                   </p>
 
                   <ProductCheckoutForm
                     product={selectedService}
                     submitLabel={`Checkout ${selectedService.name} • $${selectedService.price}`}
-                    onSuccess={() => {
+                    onSuccess={({ fullName, email, paymentIntentId }) => {
+                      setCheckoutClient({
+                        fullName,
+                        email,
+                        paymentIntentId,
+                      });
                       setSuccessMessage(
-                        `${selectedService.name} was purchased successfully. Check Stripe for the payment, then follow up with the client for files and notes.`
+                        `${selectedService.name} was purchased successfully. Upload the session below so the files and order stay together.`
                       );
+
+                      if (typeof window !== "undefined") {
+                        window.requestAnimationFrame(() => {
+                          document.getElementById("session-upload")?.scrollIntoView({
+                            behavior: "smooth",
+                            block: "start",
+                          });
+                        });
+                      }
                     }}
                   />
                 </aside>
@@ -206,13 +231,21 @@ export default function ServiceTierCheckout() {
               </article>
               <article className="panel" data-reveal="right" data-parallax="0.02">
                 <span className="step-index">03</span>
-                <h3>Send The Session</h3>
+                <h3>Upload The Session</h3>
                 <p>
-                  Email stems, rough mix notes, and references so the project can move straight into
-                  the session workflow.
+                  Send stems, the beat, and rough mix notes through the upload portal so the
+                  project lands ready for the session workflow.
                 </p>
               </article>
             </section>
+
+            <SessionUploadForm
+              selectedServiceName={selectedService?.name}
+              defaultArtistName={checkoutClient.fullName}
+              defaultEmail={checkoutClient.email}
+              paymentReference={checkoutClient.paymentIntentId}
+              paymentReady={Boolean(checkoutClient.paymentIntentId)}
+            />
           </>
         )}
       </main>

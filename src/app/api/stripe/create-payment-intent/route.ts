@@ -50,8 +50,10 @@ export async function POST(request: NextRequest) {
         category: String(category),
         fullName: String(fullName),
         email: String(email),
+        priceUsd: String(price),
         stripeProductId: String(stripeProductId || ""),
         stripePriceId: String(stripePriceId || ""),
+        orderNotificationSent: "false",
       },
     });
 

@@ -4,9 +4,15 @@ import { CardElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { useState, type FormEvent } from "react";
 import type { StoreProduct } from "@/types/store";
 
+interface CheckoutSuccessPayload {
+  fullName: string;
+  email: string;
+  paymentIntentId?: string;
+}
+
 interface ProductCheckoutFormProps {
   product: StoreProduct;
-  onSuccess: () => void;
+  onSuccess: (payload: CheckoutSuccessPayload) => void;
   onCancel?: () => void;
   submitLabel?: string;
 }
@@ -82,7 +88,29 @@ export default function ProductCheckoutForm({
       }
 
       if (paymentResult.paymentIntent?.status === "succeeded") {
-        onSuccess();
+        if (paymentResult.paymentIntent.id) {
+          const notificationResponse = await fetch("/api/stripe/notify-order", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              paymentIntentId: paymentResult.paymentIntent.id,
+              clientSecret: result.clientSecret,
+            }),
+          });
+
+          if (!notificationResponse.ok) {
+            const notificationResult = await notificationResponse.json().catch(() => null);
+            console.error("Order notification email failed.", notificationResult);
+          }
+        }
+
+        onSuccess({
+          fullName,
+          email,
+          paymentIntentId: paymentResult.paymentIntent?.id || undefined,
+        });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Something went wrong.";

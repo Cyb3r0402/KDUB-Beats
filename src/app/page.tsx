@@ -11,9 +11,9 @@ export default function HomePage() {
       <header className="topbar" data-reveal="fade" data-parallax="0.02">
         <div className="brand-lockup">
           <img src="/branding/logo.png" alt={`${settings.brandName} logo`} className="brand-mark" />
-          <div>
+          <div className="brand-copy">
             <p className="eyebrow">{settings.brandName}</p>
-            <h1 className="brand-title">{settings.heroTitle}</h1>
+            <p className="brand-title">Beats, mixing, and mastering for serious records.</p>
           </div>
         </div>
 
@@ -27,36 +27,44 @@ export default function HomePage() {
         </nav>
       </header>
 
-      <section className="hero-grid">
-        <div className="hero-copy panel" data-reveal="left" data-parallax="0.04">
-          <p className="eyebrow">Built For Independent Artists</p>
-          <h2 className="hero-title">Sleek production, clean mixes, and masters that feel ready to drop.</h2>
-          <p className="hero-text">{settings.heroDescription}</p>
-          <div className="hero-actions">
+      <section className="hero-stage panel" data-reveal="fade" data-parallax="0.03">
+        <div className="hero-copy" data-reveal="left" data-parallax="0.04">
+          <div className="hero-signal-row">
+            <span>Logic Pro</span>
+            <span>FL Studio</span>
+            <span>Stripe Checkout</span>
+          </div>
+          <p className="eyebrow">Built For Artists Who Want A Cleaner Rollout</p>
+          <h1 className="hero-headline">{settings.heroTitle}</h1>
+          <p className="hero-text hero-lead">{settings.heroDescription}</p>
+          <div className="hero-actions hero-actions-wide">
             <Link href="/beatsforsale" className="button button-primary">
               Shop Beats
             </Link>
             <Link href="/mixing-mastering" className="button button-secondary">
-              View Mix & Master Tiers
+              Book Mix & Master
             </Link>
+            <a href={`mailto:${settings.contactEmail}`} className="button button-secondary">
+              Start A Custom Session
+            </a>
           </div>
-          <div className="stat-row">
+          <div className="hero-metrics">
             <article>
-              <strong>Stripe Ready</strong>
-              <span>Beat sales and studio tier checkout in one system</span>
+              <strong>Beat Store</strong>
+              <span>Protected previews and Stripe checkout for fast sales.</span>
             </article>
             <article>
-              <strong>Tiered Services</strong>
-              <span>Mixing and mastering packages built for different release levels</span>
+              <strong>Service Tiers</strong>
+              <span>Clear mix and master packages built for different release levels.</span>
             </article>
             <article>
-              <strong>Music First</strong>
-              <span>Beats, clean finishing, and strong artist presentation in one place</span>
+              <strong>Studio Flow</strong>
+              <span>Production in FL Studio, finishing in Logic Pro, all under one brand.</span>
             </article>
           </div>
         </div>
 
-        <div className="hero-visual panel" data-reveal="right" data-parallax="0.03">
+        <div className="hero-visual" data-reveal="right" data-parallax="0.03">
           <div className="hero-logo-card" data-parallax="0.12">
             <span className="hero-wave hero-wave-top" aria-hidden="true"></span>
             <span className="hero-wave hero-wave-bottom" aria-hidden="true"></span>
@@ -64,15 +72,28 @@ export default function HomePage() {
             <div className="logo-chip-row" aria-hidden="true">
               <span>Metallic K Energy</span>
               <span>Electric Blue Pulse</span>
+              <span>Artist Ready Sound</span>
             </div>
           </div>
-          <div className="studio-stack" data-parallax="0.05">
-            <span className="eyebrow">Studio Stack</span>
-            <ul>
-              <li>FL Studio for beat design, drums, and melodies</li>
-              <li>Logic Pro for arrangement, mixing, and final polish</li>
-              <li>Built for premium artist presentation across every screen size</li>
-            </ul>
+
+          <div className="hero-side-grid" data-parallax="0.05">
+            <div className="studio-stack">
+              <span className="eyebrow">Studio Stack</span>
+              <ul>
+                <li>FL Studio for beat design, drums, and melody work</li>
+                <li>Logic Pro for arrangement, vocal polish, and final finishing</li>
+                <li>Designed to feel premium on desktop, tablet, and mobile</li>
+              </ul>
+            </div>
+
+            <div className="hero-side-card panel">
+              <p className="eyebrow">Best For</p>
+              <h2>Artists who need beats, clean mixes, and one sharp place to buy in.</h2>
+              <p>
+                The whole front page now leads people straight into the store, the service tiers,
+                or a direct custom booking conversation.
+              </p>
+            </div>
           </div>
         </div>
       </section>
@@ -99,8 +120,8 @@ export default function HomePage() {
           <p className="eyebrow">What You’re Selling</p>
           <h2>One brand, three clean ways for artists to buy in.</h2>
           <p>
-            The site is built to feel premium from the first scroll to the final checkout, whether
-            an artist needs a beat, a mix, or a full release finish.
+            The front page is meant to feel more direct now, with a cleaner path into beats,
+            mixing, mastering, or custom work instead of one oversized block fighting for attention.
           </p>
         </div>
         <div className="feature-grid">
