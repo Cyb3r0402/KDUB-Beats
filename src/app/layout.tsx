@@ -1,0 +1,29 @@
+import type { Metadata } from "next";
+import ScrollEffects from "@/components/scroll-effects";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "KDUB Beats | Beats, Mixing & Mastering",
+  description:
+    "Shop beats and book mixing and mastering services for your next release with KDUB Beats.",
+  icons: {
+    icon: "/branding/logo.png",
+    shortcut: "/branding/logo.png",
+    apple: "/branding/logo.png",
+  },
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body>
+        <ScrollEffects />
+        {children}
+      </body>
+    </html>
+  );
+}
