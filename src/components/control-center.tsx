@@ -12,9 +12,17 @@ import {
   saveStoredSettings,
 } from "@/lib/control-center-storage";
 import { defaultStoreProducts, defaultStoreSettings } from "@/lib/store-data";
+import {
+  getArtworkFileIssue,
+  getPreviewSampleFileIssue,
+  getProductReadinessIssues,
+  getReadyBeatProducts,
+  getReadyServiceProducts,
+  isProductReadyForStorefront,
+  MAX_PROTECTED_SAMPLE_SECONDS,
+  normalizeProductDraft,
+} from "@/lib/store-product-utils";
 import type { ProductCategory, StoreProduct, StoreSettings } from "@/types/store";
-
-const MAX_SAMPLE_SECONDS = 20.25;
 
 function createSlug(value: string) {
   return value
@@ -38,7 +46,7 @@ function createNewProduct(category: ProductCategory): StoreProduct {
     artwork: "",
     audioPreview: "",
     previewDuration: undefined,
-    deliverables: [""],
+    deliverables: [],
     badge: "",
   };
 }
@@ -87,26 +95,19 @@ function formatDuration(seconds: number | undefined) {
   return `${seconds.toFixed(1)}s`;
 }
 
-function getProtectedSampleIssue(products: StoreProduct[]) {
-  const invalidPreview = products.find((product) => {
-    if (product.category !== "beat" || !product.audioPreview) {
-      return false;
-    }
-
-    const isUploadedSample = product.audioPreview.startsWith("data:");
-
-    if (product.previewDuration && product.previewDuration > MAX_SAMPLE_SECONDS) {
-      return true;
-    }
-
-    return isUploadedSample && (!product.previewDuration || product.previewDuration > MAX_SAMPLE_SECONDS);
-  });
-
-  if (!invalidPreview) {
-    return "";
+function getCatalogStatusMessage(products: StoreProduct[]) {
+  if (!products.length) {
+    return "Start by adding a beat or service. Beats stay hidden until artwork, pricing, and a protected sample are all in place.";
   }
 
-  return `${invalidPreview.name || "A beat"} needs a fresh sample upload. Only 20-second previews can be saved in the control center.`;
+  const readyCount = products.filter(isProductReadyForStorefront).length;
+  const draftCount = products.length - readyCount;
+
+  if (!draftCount) {
+    return `All ${readyCount} catalog item(s) are storefront-ready with the current rules.`;
+  }
+
+  return `${readyCount} item(s) are ready for the storefront. ${draftCount} draft item(s) stay hidden until their media and details are complete.`;
 }
 
 interface ControlCenterProps {
@@ -136,17 +137,19 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
   const [saving, setSaving] = useState(false);
   const [stripeSyncing, setStripeSyncing] = useState(false);
   const [statusMessage, setStatusMessage] = useState(
-    "Beats only go live from uploads made here. Use short preview snippets only, and anything longer than 20 seconds is rejected."
+    "Beats only go live from uploads made here. Use MP3, M4A, AAC, or OGG samples only, and anything longer than 20 seconds is rejected."
   );
   const beatCount = products.filter((product) => product.category === "beat").length;
-  const serviceCount = products.filter((product) => product.category === "service").length;
+  const readyBeatCount = getReadyBeatProducts(products).length;
+  const readyServiceCount = getReadyServiceProducts(products).length;
+  const draftProductCount = products.filter((product) => !isProductReadyForStorefront(product)).length;
   const stripeLinkedCount = products.filter((product) => Boolean(product.stripePriceId)).length;
   const protectedSampleCount = products.filter(
     (product) =>
       product.category === "beat" &&
       Boolean(product.audioPreview) &&
       typeof product.previewDuration === "number" &&
-      product.previewDuration <= MAX_SAMPLE_SECONDS
+      product.previewDuration <= MAX_PROTECTED_SAMPLE_SECONDS
   ).length;
 
   useEffect(() => {
@@ -158,12 +161,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
       setProducts(storedProducts);
       setSettings(storedSettings);
-
-      const sampleIssue = getProtectedSampleIssue(storedProducts);
-
-      if (sampleIssue) {
-        setStatusMessage(sampleIssue);
-      }
+      setStatusMessage(getCatalogStatusMessage(storedProducts));
     }
 
     loadContent().catch(() => {
@@ -196,7 +194,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       .filter(Boolean);
 
     updateProduct(index, {
-      deliverables: deliverables.length ? deliverables : [""],
+      deliverables,
     });
   }
 
@@ -212,13 +210,28 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     }
 
     try {
+      if (field === "artwork") {
+        const artworkIssue = getArtworkFileIssue(file);
+
+        if (artworkIssue) {
+          setStatusMessage(artworkIssue);
+          return;
+        }
+      }
+
       if (field === "audioPreview") {
+        const previewTypeIssue = getPreviewSampleFileIssue(file);
+
+        if (previewTypeIssue) {
+          setStatusMessage(previewTypeIssue);
+          return;
+        }
+
         const duration = await getAudioDuration(file);
 
-        if (duration > MAX_SAMPLE_SECONDS) {
-          event.target.value = "";
+        if (duration > MAX_PROTECTED_SAMPLE_SECONDS) {
           setStatusMessage(
-            "Preview rejected. Upload a 20-second sample or shorter, not the full beat."
+            `Preview rejected. Upload a ${MAX_PROTECTED_SAMPLE_SECONDS}-second sample or shorter, not the full beat.`
           );
           return;
         }
@@ -229,17 +242,19 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
           previewDuration: duration,
         });
         setStatusMessage(
-          `Preview sample loaded at ${duration.toFixed(1)} seconds. This fits the 20-second security limit.`
+          `Protected sample loaded at ${duration.toFixed(1)} seconds. Finish the remaining details and this beat can go live.`
         );
         return;
       }
 
       const dataUrl = await fileToDataUrl(file);
       updateProduct(index, { artwork: dataUrl });
-      setStatusMessage("Artwork loaded. Save changes to publish it.");
+      setStatusMessage("Artwork loaded. Add pricing and a protected sample to make this beat storefront-ready.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed.";
       setStatusMessage(message);
+    } finally {
+      event.target.value = "";
     }
   }
 
@@ -247,15 +262,17 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     setSaving(true);
 
     try {
-      const sampleIssue = getProtectedSampleIssue(products);
+      const normalizedProducts = products.map(normalizeProductDraft);
+      const readyCount = normalizedProducts.filter(isProductReadyForStorefront).length;
+      const draftCount = normalizedProducts.length - readyCount;
 
-      if (sampleIssue) {
-        setStatusMessage(sampleIssue);
-        return;
-      }
-
-      await Promise.all([saveStoredProducts(products), saveStoredSettings(settings)]);
-      setStatusMessage("Control center changes saved. Refresh the storefront if it is already open in another tab.");
+      await Promise.all([saveStoredProducts(normalizedProducts), saveStoredSettings(settings)]);
+      setProducts(normalizedProducts);
+      setStatusMessage(
+        draftCount
+          ? `Saved. ${readyCount} item(s) are ready for the storefront and ${draftCount} draft item(s) stay hidden until they are complete.`
+          : `Saved. All ${readyCount} item(s) are storefront-ready.`
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Save failed.";
       setStatusMessage(message);
@@ -271,7 +288,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       await resetStoredContent();
       setProducts(defaultStoreProducts);
       setSettings(defaultStoreSettings);
-      setStatusMessage("Control center content was reset to the starter defaults.");
+      setStatusMessage(getCatalogStatusMessage(defaultStoreProducts));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Reset failed.";
       setStatusMessage(message);
@@ -284,10 +301,12 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     setStripeSyncing(true);
 
     try {
-      const sampleIssue = getProtectedSampleIssue(products);
+      const normalizedProducts = products.map(normalizeProductDraft);
+      const readyProducts = normalizedProducts.filter(isProductReadyForStorefront);
+      const skippedCount = normalizedProducts.length - readyProducts.length;
 
-      if (sampleIssue) {
-        setStatusMessage(sampleIssue);
+      if (!readyProducts.length) {
+        setStatusMessage("Nothing is ready for Stripe yet. Finish the uploads and required details on at least one product first.");
         return;
       }
 
@@ -297,7 +316,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          products,
+          products: readyProducts,
         }),
       });
 
@@ -307,10 +326,22 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
         throw new Error(result.error || "Stripe sync failed.");
       }
 
-      setProducts(result.products);
-      await saveStoredProducts(result.products);
+      const syncedProductMap = new Map<string, StoreProduct>(
+        result.products.map((product: StoreProduct) => [
+          product.id,
+          normalizeProductDraft(product),
+        ])
+      );
+      const mergedProducts = normalizedProducts.map(
+        (product) => syncedProductMap.get(product.id) || product
+      );
+
+      setProducts(mergedProducts);
+      await saveStoredProducts(mergedProducts);
       setStatusMessage(
-        `Stripe synced for ${result.syncedCount} products. Checkout now uses Stripe-linked pricing where available.`
+        skippedCount
+          ? `Stripe synced for ${result.syncedCount} storefront-ready product(s). ${skippedCount} draft item(s) were skipped until their uploads and details are complete.`
+          : `Stripe synced for ${result.syncedCount} storefront-ready product(s).`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Stripe sync failed.";
@@ -358,24 +389,24 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       <section className="section-block section-block-tight">
         <div className="control-overview" data-reveal="fade">
           <article className="panel control-overview-card">
-            <span className="control-overview-label">Beats Loaded</span>
+            <span className="control-overview-label">Beat Drafts</span>
             <strong className="control-overview-value">{beatCount}</strong>
-            <p>Catalog items ready to preview and sell from the storefront.</p>
-          </article>
-          <article className="panel control-overview-card">
-            <span className="control-overview-label">Service Offers</span>
-            <strong className="control-overview-value">{serviceCount}</strong>
-            <p>Mixing and mastering packages currently listed in the store.</p>
+            <p>{readyBeatCount} beat{readyBeatCount === 1 ? "" : "s"} are fully ready for the public storefront.</p>
           </article>
           <article className="panel control-overview-card">
             <span className="control-overview-label">Protected Samples</span>
             <strong className="control-overview-value">{protectedSampleCount}</strong>
-            <p>Beat previews already verified under the 20-second upload limit.</p>
+            <p>Beat previews already verified at {MAX_PROTECTED_SAMPLE_SECONDS} seconds or less.</p>
           </article>
           <article className="panel control-overview-card">
-            <span className="control-overview-label">Stripe Linked</span>
-            <strong className="control-overview-value">{stripeLinkedCount}</strong>
-            <p>Products already synced with Stripe-backed pricing IDs.</p>
+            <span className="control-overview-label">Live Services</span>
+            <strong className="control-overview-value">{readyServiceCount}</strong>
+            <p>Service tiers currently complete enough to appear in the public checkout flow.</p>
+          </article>
+          <article className="panel control-overview-card">
+            <span className="control-overview-label">Hidden Drafts</span>
+            <strong className="control-overview-value">{draftProductCount}</strong>
+            <p>Items saved here but still hidden until their uploads and details are complete.</p>
           </article>
         </div>
       </section>
@@ -558,12 +589,20 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
         </p>
 
         <div className="control-stack">
-          {products.map((product, index) => (
+          {products.map((product, index) => {
+            const normalizedProduct = normalizeProductDraft(product);
+            const productIssues = getProductReadinessIssues(normalizedProduct);
+            const isReady = productIssues.length === 0;
+
+            return (
             <article className="panel control-panel" key={product.id} data-reveal="zoom">
               <div className="control-card-topline">
-                <div>
+                <div className="control-title-stack">
                   <p className="eyebrow">{product.category === "beat" ? "Beat Item" : "Service Item"}</p>
                   <h3>{product.name || "Untitled Product"}</h3>
+                  <span className={`control-status-badge${isReady ? " is-ready" : " is-draft"}`}>
+                    {isReady ? "Storefront Ready" : "Hidden Draft"}
+                  </span>
                 </div>
                 <button
                   type="button"
@@ -576,6 +615,25 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
               <div className="control-product-layout">
                 <div className="control-main-stack">
+                  <section className="control-subpanel control-readiness-panel">
+                    <p className="eyebrow">Store Readiness</p>
+                    <div className="control-meta-inline">
+                      <span>Visibility</span>
+                      <strong>{isReady ? "Public storefront and checkout ready" : "Saved as hidden draft"}</strong>
+                    </div>
+                    {productIssues.length ? (
+                      <ul className="control-issue-list">
+                        {productIssues.map((issue) => (
+                          <li key={issue}>{issue}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="control-ready-note">
+                        This item has the uploads and required details it needs to appear publicly.
+                      </p>
+                    )}
+                  </section>
+
                   <div className="control-grid control-grid-product">
                     <label>
                       Product Type
@@ -649,6 +707,10 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                     <p className="eyebrow">Store Snapshot</p>
                     <div className="control-meta-list">
                       <div>
+                        <span>Store Status</span>
+                        <strong>{isReady ? "Live-ready" : "Hidden draft"}</strong>
+                      </div>
+                      <div>
                         <span>Slug</span>
                         <strong>{product.slug}</strong>
                       </div>
@@ -658,7 +720,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                       </div>
                       <div>
                         <span>Preview Limit</span>
-                        <strong>{product.category === "beat" ? "20 seconds max" : "Not used"}</strong>
+                        <strong>{product.category === "beat" ? `${MAX_PROTECTED_SAMPLE_SECONDS} seconds max` : "Not used"}</strong>
                       </div>
                       <div>
                         <span>Stripe Link</span>
@@ -677,6 +739,20 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                     <section className="control-subpanel">
                       <p className="eyebrow">Beat Media</p>
                       <div className="control-media-stack">
+                        <div className="control-media-grid">
+                          <div className={`control-media-state${product.artwork ? " is-ready" : ""}`}>
+                            <span>Artwork</span>
+                            <strong>{product.artwork ? "Uploaded" : "Missing"}</strong>
+                          </div>
+                          <div className={`control-media-state${product.audioPreview ? " is-ready" : ""}`}>
+                            <span>Protected Sample</span>
+                            <strong>
+                              {product.audioPreview
+                                ? `${formatDuration(product.previewDuration)} loaded`
+                                : "Missing"}
+                            </strong>
+                          </div>
+                        </div>
                         <label>
                           Artwork Upload
                           <input
@@ -689,12 +765,16 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                           Sample Upload
                           <input
                             type="file"
-                            accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg"
+                            accept=".mp3,.m4a,.aac,.ogg,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/aac,audio/ogg"
                             onChange={(event) => void handleFileUpload(event, index, "audioPreview")}
                           />
                         </label>
+                        <p className="control-media-guidance">
+                          Only MP3, M4A, AAC, or OGG sample snippets are accepted here. WAV files and
+                          anything over {MAX_PROTECTED_SAMPLE_SECONDS} seconds are rejected to help protect the beat.
+                        </p>
                         <p className="control-security-note">
-                          Upload preview snippets only. Any audio longer than 20 seconds is blocked.
+                          Upload preview snippets only. The public site keeps playback locked to the first {MAX_PROTECTED_SAMPLE_SECONDS} seconds.
                         </p>
                         <div className="control-meta-inline">
                           <span>Current sample length</span>
@@ -739,7 +819,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                 </aside>
               </div>
             </article>
-          ))}
+          )})}
         </div>
       </section>
     </main>

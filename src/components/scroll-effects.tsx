@@ -15,6 +15,17 @@ export default function ScrollEffects() {
 
     const revealed = new Set<Element>();
     const parallaxItems = new Set<HTMLElement>();
+    const pointerCenter = {
+      x: window.innerWidth / 2,
+      y: window.innerHeight * 0.24,
+    };
+
+    let targetScrollY = window.scrollY;
+    let smoothScrollY = window.scrollY;
+    let targetPointerX = pointerCenter.x;
+    let targetPointerY = pointerCenter.y;
+    let pointerX = targetPointerX;
+    let pointerY = targetPointerY;
 
     const revealObserver = new IntersectionObserver(
       (entries) => {
@@ -49,11 +60,18 @@ export default function ScrollEffects() {
     let rafId = 0;
 
     function syncScrollEffects() {
-      rafId = 0;
-
       const scrollHeight = Math.max(document.documentElement.scrollHeight - window.innerHeight, 1);
-      const progress = window.scrollY / scrollHeight;
+
+      smoothScrollY += (targetScrollY - smoothScrollY) * 0.08;
+      pointerX += (targetPointerX - pointerX) * 0.12;
+      pointerY += (targetPointerY - pointerY) * 0.12;
+
+      const progress = smoothScrollY / scrollHeight;
       root.style.setProperty("--scroll-progress", progress.toFixed(4));
+      root.style.setProperty("--page-depth", ((progress - 0.5) * 2).toFixed(4));
+      root.style.setProperty("--scroll-sheen", (0.18 + progress * 0.82).toFixed(4));
+      root.style.setProperty("--pointer-x", `${((pointerX / Math.max(window.innerWidth, 1)) * 100).toFixed(2)}%`);
+      root.style.setProperty("--pointer-y", `${((pointerY / Math.max(window.innerHeight, 1)) * 100).toFixed(2)}%`);
 
       parallaxItems.forEach((element) => {
         const speed = Number(element.dataset.parallax || "0.08");
@@ -61,16 +79,35 @@ export default function ScrollEffects() {
         const elementCenter = rect.top + rect.height / 2;
         const viewportCenter = window.innerHeight / 2;
         const offset = (viewportCenter - elementCenter) * speed;
+        const normalizedDistance = (viewportCenter - elementCenter) / Math.max(window.innerHeight, 1);
+        const clampedDistance = Math.max(-1.15, Math.min(1.15, normalizedDistance));
+        const proximity = Math.max(0, 1 - Math.abs(clampedDistance));
+        const lift = proximity * -16;
+
+        const scale = 1 + Math.min(Math.abs(offset) * 0.00008, 0.018);
         element.style.setProperty("--parallax-y", `${offset.toFixed(1)}px`);
+        element.style.setProperty("--parallax-scale", scale.toFixed(3));
+        element.style.setProperty("--section-progress", proximity.toFixed(3));
+        element.style.setProperty("--scroll-lift", `${lift.toFixed(1)}px`);
+        element.style.setProperty("--scroll-tilt", `${(clampedDistance * -4.2).toFixed(2)}deg`);
+        element.style.setProperty("--scroll-opacity", `${(0.88 + proximity * 0.12).toFixed(3)}`);
       });
+
+      rafId = window.requestAnimationFrame(syncScrollEffects);
     }
 
     function requestSync() {
-      if (rafId) {
-        return;
-      }
+      targetScrollY = window.scrollY;
+    }
 
-      rafId = window.requestAnimationFrame(syncScrollEffects);
+    function handlePointerMove(event: PointerEvent) {
+      targetPointerX = event.clientX;
+      targetPointerY = event.clientY;
+    }
+
+    function handlePointerLeave() {
+      targetPointerX = window.innerWidth / 2;
+      targetPointerY = window.innerHeight * 0.24;
     }
 
     const mutationObserver = new MutationObserver(() => {
@@ -84,23 +121,33 @@ export default function ScrollEffects() {
     });
 
     registerTargets();
-    requestSync();
+    root.classList.add("page-ready");
+    rafId = window.requestAnimationFrame(syncScrollEffects);
 
     window.addEventListener("scroll", requestSync, { passive: true });
     window.addEventListener("resize", requestSync);
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    window.addEventListener("pointerleave", handlePointerLeave);
 
     return () => {
       revealObserver.disconnect();
       mutationObserver.disconnect();
       window.removeEventListener("scroll", requestSync);
       window.removeEventListener("resize", requestSync);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerleave", handlePointerLeave);
 
       if (rafId) {
         window.cancelAnimationFrame(rafId);
       }
 
       root.classList.remove("motion-enabled");
+      root.classList.remove("page-ready");
       root.style.removeProperty("--scroll-progress");
+      root.style.removeProperty("--page-depth");
+      root.style.removeProperty("--scroll-sheen");
+      root.style.removeProperty("--pointer-x");
+      root.style.removeProperty("--pointer-y");
     };
   }, []);
 

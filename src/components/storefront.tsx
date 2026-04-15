@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Elements } from "@stripe/react-stripe-js";
 import ProductCheckoutForm from "@/components/product-checkout-form";
 import { useControlCenterContent } from "@/hooks/use-control-center-content";
+import { getReadyBeatProducts, getReadyServiceProducts } from "@/lib/store-product-utils";
 import SampleAudioPlayer from "@/components/sample-audio-player";
 import { stripePromise } from "@/lib/stripe-client";
 
@@ -22,17 +23,14 @@ export default function Storefront() {
     }
   }, []);
 
-  const beats = useMemo(() => products.filter((product) => product.category === "beat"), [products]);
-  const services = useMemo(
-    () => products.filter((product) => product.category === "service"),
-    [products]
-  );
+  const beats = useMemo(() => getReadyBeatProducts(products), [products]);
+  const services = useMemo(() => getReadyServiceProducts(products), [products]);
 
   return (
     <Elements stripe={stripePromise}>
       <main className="page-shell storefront-page">
-        <header className="store-hero panel">
-          <div data-reveal="left">
+        <header className="store-hero panel" data-parallax="0.03">
+          <div data-reveal="left" data-parallax="0.025">
             <p className="eyebrow">Beat Store</p>
             <h1 className="hero-title">{settings.storeTitle}</h1>
             <p className="hero-text">{settings.storeDescription}</p>
@@ -43,7 +41,7 @@ export default function Storefront() {
             </div>
           </div>
           <div className="store-hero-visual" data-reveal="right" data-parallax="0.12">
-            <div className="store-hero-logo-shell">
+            <div className="store-hero-logo-shell" data-parallax="0.08">
               <span className="hero-wave hero-wave-top" aria-hidden="true"></span>
               <span className="hero-wave hero-wave-bottom" aria-hidden="true"></span>
               <img src="/branding/logo.png" alt="KDUB Beats logo" className="store-hero-logo" />
@@ -82,7 +80,7 @@ export default function Storefront() {
                 const isActive = activeProductId === product.id;
 
                 return (
-                  <article className="panel store-card" key={product.id} data-reveal="zoom">
+                  <article className="panel store-card" key={product.id} data-reveal="zoom" data-parallax="0.018">
                     {product.badge ? <span className="product-badge">{product.badge}</span> : null}
                     {product.artwork ? (
                       <img src={product.artwork} alt={`${product.name} artwork`} className="product-artwork" />
@@ -153,7 +151,7 @@ export default function Storefront() {
             <div className="service-tier-preview-grid">
               {services.map((product) => {
                 return (
-                  <article className="panel store-card service-store-card" key={product.id} data-reveal="zoom">
+                  <article className="panel store-card service-store-card" key={product.id} data-reveal="zoom" data-parallax="0.018">
                     {product.badge ? <span className="product-badge">{product.badge}</span> : null}
                     <div className="store-card-body">
                       <div className="product-topline">
@@ -185,7 +183,7 @@ export default function Storefront() {
               </p>
             </article>
           )}
-          <div className="panel service-cta-banner" data-reveal="fade">
+          <div className="panel service-cta-banner" data-reveal="fade" data-parallax="0.04">
             <div>
               <p className="eyebrow">Dedicated Service Checkout</p>
               <h3>Let artists compare tiers before they pay.</h3>

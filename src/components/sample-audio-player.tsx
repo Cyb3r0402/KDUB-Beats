@@ -53,7 +53,7 @@ export default function SampleAudioPlayer({
         controls
         preload="metadata"
         className={className}
-        controlsList="nodownload noplaybackrate"
+        controlsList="nodownload noplaybackrate noremoteplayback"
         onTimeUpdate={stopAtLimit}
         onSeeking={handleSeeking}
       >

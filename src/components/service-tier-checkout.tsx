@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ProductCheckoutForm from "@/components/product-checkout-form";
 import { useControlCenterContent } from "@/hooks/use-control-center-content";
+import { getReadyServiceProducts } from "@/lib/store-product-utils";
 import { stripePromise } from "@/lib/stripe-client";
 
 export default function ServiceTierCheckout() {
@@ -24,7 +25,7 @@ export default function ServiceTierCheckout() {
   }, []);
 
   const services = useMemo(
-    () => products.filter((product) => product.category === "service"),
+    () => getReadyServiceProducts(products),
     [products]
   );
   const selectedSlug = searchParams.get("tier");
@@ -52,8 +53,8 @@ export default function ServiceTierCheckout() {
   return (
     <Elements stripe={stripePromise}>
       <main className="page-shell services-page">
-        <header className="services-hero panel">
-          <div data-reveal="left">
+        <header className="services-hero panel" data-parallax="0.03">
+          <div data-reveal="left" data-parallax="0.025">
             <p className="eyebrow">Mixing & Mastering Checkout</p>
             <h1 className="hero-title">Choose the tier that fits your record, then checkout securely.</h1>
             <p className="hero-text">
@@ -75,7 +76,7 @@ export default function ServiceTierCheckout() {
               <span>Stripe Checkout</span>
               <span>Artist Follow-Up</span>
             </div>
-            <div className="service-hero-note">
+            <div className="service-hero-note" data-parallax="0.06">
               <p className="eyebrow">What Happens Next</p>
               <h3>Checkout holds your slot.</h3>
               <p>
@@ -118,6 +119,7 @@ export default function ServiceTierCheckout() {
                       key={service.id}
                       className={`panel service-tier-card${isSelected ? " is-selected" : ""}`}
                       data-reveal="zoom"
+                      data-parallax="0.02"
                     >
                       {service.badge ? <span className="product-badge">{service.badge}</span> : null}
                       <div className="service-tier-card-body">
@@ -146,7 +148,7 @@ export default function ServiceTierCheckout() {
               </div>
 
               {selectedService ? (
-                <aside className="panel service-checkout-panel" data-reveal="fade">
+                <aside className="panel service-checkout-panel" data-reveal="fade" data-parallax="0.02">
                   <div className="service-checkout-copy">
                     <p className="eyebrow">Secure Checkout</p>
                     <h2>{selectedService.name}</h2>
@@ -189,7 +191,7 @@ export default function ServiceTierCheckout() {
             </section>
 
             <section className="section-block service-process-grid">
-              <article className="panel" data-reveal="left">
+              <article className="panel" data-reveal="left" data-parallax="0.02">
                 <span className="step-index">01</span>
                 <h3>Pick Your Tier</h3>
                 <p>
@@ -197,12 +199,12 @@ export default function ServiceTierCheckout() {
                   deadline.
                 </p>
               </article>
-              <article className="panel" data-reveal="fade">
+              <article className="panel" data-reveal="fade" data-parallax="0.02">
                 <span className="step-index">02</span>
                 <h3>Checkout Securely</h3>
                 <p>Pay through Stripe and lock in the selected service tier from the page.</p>
               </article>
-              <article className="panel" data-reveal="right">
+              <article className="panel" data-reveal="right" data-parallax="0.02">
                 <span className="step-index">03</span>
                 <h3>Send The Session</h3>
                 <p>

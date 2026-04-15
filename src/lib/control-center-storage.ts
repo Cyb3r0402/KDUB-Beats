@@ -1,4 +1,5 @@
 import { defaultStoreProducts, defaultStoreSettings } from "@/lib/store-data";
+import { normalizeProductDraft } from "@/lib/store-product-utils";
 import type { StoreProduct, StoreSettings } from "@/types/store";
 
 const DB_NAME = "kdub-control-center";
@@ -82,15 +83,10 @@ async function writeValue<T>(key: string, value: T): Promise<void> {
   });
 }
 
-function cloneProducts(products: StoreProduct[]) {
-  return products.map((product) => ({
-    ...product,
-    deliverables: [...product.deliverables],
-  }));
-}
-
 function normalizeProducts(products: StoreProduct[]) {
-  return cloneProducts(products).filter((product) => !isLegacyDemoBeat(product));
+  return products
+    .map(normalizeProductDraft)
+    .filter((product) => !isLegacyDemoBeat(product));
 }
 
 export async function getStoredProducts(): Promise<StoreProduct[]> {
