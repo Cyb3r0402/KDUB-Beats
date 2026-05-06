@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { defaultStoreProducts, defaultStoreSettings } from "@/lib/store-data";
 import {
-  getStoredProducts,
-  getStoredSettings,
+  getStoredContent,
   subscribeToControlCenterUpdates,
 } from "@/lib/control-center-storage";
 import type { StoreProduct, StoreSettings } from "@/types/store";
@@ -18,17 +17,14 @@ export function useControlCenterContent() {
     let active = true;
 
     async function loadContent() {
-      const [storedProducts, storedSettings] = await Promise.all([
-        getStoredProducts(),
-        getStoredSettings(),
-      ]);
+      const storedContent = await getStoredContent();
 
       if (!active) {
         return;
       }
 
-      setProducts(storedProducts);
-      setSettings(storedSettings);
+      setProducts(storedContent.products);
+      setSettings(storedContent.settings);
       setLoading(false);
     }
 

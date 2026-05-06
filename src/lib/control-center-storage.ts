@@ -1,34 +1,19 @@
-import { defaultStoreProducts, defaultStoreSettings, getDefaultSiteElements } from "@/lib/store-data";
-import { normalizeProductDraft } from "@/lib/store-product-utils";
-import type {
-  StoreProduct,
-  StoreSettings,
-  StoreSiteElement,
-  StoreSiteElementPlacement,
-} from "@/types/store";
+import {
+  getDefaultStoreContent,
+  normalizeStoreContent,
+  type StoreContent,
+} from "@/lib/store-content";
+import type { StoreProduct, StoreSettings } from "@/types/store";
 
 const DB_NAME = "kdub-control-center";
 const STORE_NAME = "content";
 const PRODUCTS_KEY = "products";
 const SETTINGS_KEY = "settings";
 const UPDATE_EVENT = "controlcenter:update";
-const LEGACY_CONTACT_EMAIL = "bookings@kdubbeats.com";
-const LEGACY_STATIC_DEMO_BEAT_IDS = new Set(["beat-midnight-current", "beat-blue-voltage"]);
-const LEGACY_STATIC_DEMO_PATH_PREFIXES = ["/audio/previews/", "/images/BeatCoverArt/"] as const;
+const CONTENT_API_PATH = "/api/control-center/content";
 
-function isLegacyDemoBeat(product: StoreProduct) {
-  if (product.category !== "beat") {
-    return false;
-  }
-
-  return (
-    LEGACY_STATIC_DEMO_BEAT_IDS.has(product.id) ||
-    LEGACY_STATIC_DEMO_PATH_PREFIXES.some(
-      (prefix) =>
-        product.audioPreview?.startsWith(prefix) ||
-        product.artwork?.startsWith(prefix)
-    )
-  );
+interface PublishedStoreContentResponse extends Partial<StoreContent> {
+  source?: "blob" | "defaults";
 }
 
 function hasIndexedDb() {
@@ -89,101 +74,152 @@ async function writeValue<T>(key: string, value: T): Promise<void> {
   });
 }
 
-function normalizeProducts(products: StoreProduct[]) {
-  return products
-    .map(normalizeProductDraft)
-    .filter((product) => !isLegacyDemoBeat(product));
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error.";
 }
 
-function cleanText(value: string | undefined) {
-  return (value || "").trim();
+async function getLocalStoreContent(): Promise<StoreContent | null> {
+  const [products, settings] = await Promise.all([
+    readValue<StoreProduct[]>(PRODUCTS_KEY),
+    readValue<StoreSettings>(SETTINGS_KEY),
+  ]);
+
+  if (!products && !settings) {
+    return null;
+  }
+
+  return normalizeStoreContent({
+    products: products || undefined,
+    settings: settings || undefined,
+  });
 }
 
-function normalizeSiteElements(elements: StoreSiteElement[] | undefined) {
-  const defaultElements = getDefaultSiteElements();
-  const sourceElements = Array.isArray(elements) && elements.length ? elements : defaultElements;
-
-  return sourceElements
-    .map((element, index) => {
-      const fallback = defaultElements[index];
-      const placement: StoreSiteElementPlacement =
-        element.placement === "homepage-workflow" ? "homepage-workflow" : "homepage-feature";
-
-      return {
-        id: cleanText(element.id) || fallback?.id || `site-element-${index + 1}`,
-        placement,
-        label: cleanText(element.label) || fallback?.label || "Site Element",
-        eyebrow: cleanText(element.eyebrow) || fallback?.eyebrow || "",
-        title: cleanText(element.title) || fallback?.title || "Untitled Element",
-        description: cleanText(element.description) || fallback?.description || "",
-        visible: element.visible !== false,
-      };
-    })
-    .filter((element) => element.title || element.description);
+async function saveLocalStoreContent(content: StoreContent) {
+  await Promise.all([
+    writeValue(PRODUCTS_KEY, content.products),
+    writeValue(SETTINGS_KEY, content.settings),
+  ]);
 }
 
-function normalizeSettings(settings: StoreSettings): StoreSettings {
-  return {
-    ...defaultStoreSettings,
-    ...settings,
-    brandName: cleanText(settings.brandName) || defaultStoreSettings.brandName,
-    heroTitle: cleanText(settings.heroTitle) || defaultStoreSettings.heroTitle,
-    heroDescription: cleanText(settings.heroDescription) || defaultStoreSettings.heroDescription,
-    storeTitle: cleanText(settings.storeTitle) || defaultStoreSettings.storeTitle,
-    storeDescription: cleanText(settings.storeDescription) || defaultStoreSettings.storeDescription,
-    contactEmail: cleanText(settings.contactEmail) || defaultStoreSettings.contactEmail,
-    instagramUrl: cleanText(settings.instagramUrl) || defaultStoreSettings.instagramUrl,
-    siteElements: normalizeSiteElements(settings.siteElements),
-  };
+async function fetchPublishedStoreContent() {
+  try {
+    const response = await fetch(CONTENT_API_PATH, {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const result = (await response.json()) as PublishedStoreContentResponse;
+
+    return {
+      content: normalizeStoreContent(result),
+      source: result.source || "defaults",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function publishStoreContent(content: StoreContent) {
+  const response = await fetch(CONTENT_API_PATH, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    cache: "no-store",
+    body: JSON.stringify(content),
+  });
+
+  const result = (await response.json().catch(() => null)) as
+    | (PublishedStoreContentResponse & { error?: string })
+    | null;
+
+  if (!response.ok) {
+    throw new Error(result?.error || "Unable to publish changes to the public site.");
+  }
+
+  return normalizeStoreContent(result || content);
+}
+
+export async function getStoredContent(): Promise<StoreContent> {
+  const [publishedContent, localContent] = await Promise.all([
+    fetchPublishedStoreContent(),
+    getLocalStoreContent(),
+  ]);
+
+  if (publishedContent?.source === "blob") {
+    await saveLocalStoreContent(publishedContent.content).catch(() => undefined);
+    return publishedContent.content;
+  }
+
+  if (localContent) {
+    return localContent;
+  }
+
+  return publishedContent?.content || getDefaultStoreContent();
+}
+
+export async function saveStoredContent(
+  products: StoreProduct[],
+  settings: StoreSettings
+): Promise<StoreContent> {
+  const content = normalizeStoreContent({ products, settings });
+  let publishedContent: StoreContent | null = null;
+  let publishError: unknown = null;
+
+  try {
+    publishedContent = await publishStoreContent(content);
+  } catch (error) {
+    publishError = error;
+  }
+
+  const contentToKeep = publishedContent || content;
+  await saveLocalStoreContent(contentToKeep);
+  notifyControlCenterUpdate();
+
+  if (publishError) {
+    throw new Error(`Saved in this browser, but the public site was not updated: ${getErrorMessage(publishError)}`);
+  }
+
+  return contentToKeep;
 }
 
 export async function getStoredProducts(): Promise<StoreProduct[]> {
-  const products = await readValue<StoreProduct[]>(PRODUCTS_KEY);
-  return products ? normalizeProducts(products) : normalizeProducts(defaultStoreProducts);
+  const content = await getStoredContent();
+  return content.products;
 }
 
 export async function saveStoredProducts(products: StoreProduct[]): Promise<void> {
-  await writeValue(PRODUCTS_KEY, normalizeProducts(products));
-  notifyControlCenterUpdate();
+  const content = await getStoredContent();
+  await saveStoredContent(products, content.settings);
 }
 
 export async function getStoredSettings(): Promise<StoreSettings> {
-  const settings = await readValue<StoreSettings>(SETTINGS_KEY);
-
-  if (!settings) {
-    return normalizeSettings(defaultStoreSettings);
-  }
-
-  if (settings.contactEmail === LEGACY_CONTACT_EMAIL) {
-    const migratedSettings = {
-      ...settings,
-      contactEmail: defaultStoreSettings.contactEmail,
-    };
-
-    const normalizedSettings = normalizeSettings(migratedSettings);
-    await writeValue(SETTINGS_KEY, normalizedSettings).catch(() => undefined);
-    return normalizedSettings;
-  }
-
-  return normalizeSettings(settings);
+  const content = await getStoredContent();
+  return content.settings;
 }
 
 export async function saveStoredSettings(settings: StoreSettings): Promise<void> {
-  await writeValue(SETTINGS_KEY, normalizeSettings(settings));
-  notifyControlCenterUpdate();
+  const content = await getStoredContent();
+  await saveStoredContent(content.products, settings);
 }
 
 export async function resetStoredContent(): Promise<void> {
-  await Promise.all([
-    writeValue(PRODUCTS_KEY, normalizeProducts(defaultStoreProducts)),
-    writeValue(SETTINGS_KEY, normalizeSettings(defaultStoreSettings)),
-  ]);
-  notifyControlCenterUpdate();
+  const defaultContent = getDefaultStoreContent();
+  await saveStoredContent(defaultContent.products, defaultContent.settings);
 }
 
 export function notifyControlCenterUpdate() {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(UPDATE_EVENT));
+
+    try {
+      window.localStorage.setItem(UPDATE_EVENT, Date.now().toString());
+    } catch {
+      // Cross-tab refresh is best-effort; same-tab updates use the event above.
+    }
   }
 }
 

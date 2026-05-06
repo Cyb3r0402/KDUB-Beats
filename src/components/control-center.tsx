@@ -8,11 +8,10 @@ import SampleAudioPlayer from "@/components/sample-audio-player";
 import { formatFileSize } from "@/lib/session-upload";
 import type { StripeMode } from "@/lib/stripe";
 import {
-  getStoredProducts,
-  getStoredSettings,
+  getStoredContent,
   resetStoredContent,
+  saveStoredContent,
   saveStoredProducts,
-  saveStoredSettings,
 } from "@/lib/control-center-storage";
 import { defaultStoreProducts, defaultStoreSettings } from "@/lib/store-data";
 import {
@@ -73,6 +72,7 @@ function createNewProduct(category: ProductCategory): StoreProduct {
     deliveryFileUrl: "",
     deliveryFileName: "",
     deliveryFileSize: undefined,
+    deliveryFileReady: false,
     soldOut: false,
     deliverables:
       category === "beat"
@@ -109,6 +109,127 @@ function getBeatDeliveryPathname(product: StoreProduct, fileName: string) {
   return `beat-delivery/${safeProduct}/${Date.now()}-${safeFile || "full-beat"}`;
 }
 
+function getSafeUploadFileName(fileName: string, fallbackName: string) {
+  const safeFile = fileName
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9.]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return safeFile || fallbackName;
+}
+
+function getStoreMediaPathname(
+  product: StoreProduct,
+  fileName: string,
+  kind: "artwork" | "previews"
+) {
+  const safeProduct = createSlug(product.name || product.slug || product.id) || "store-item";
+  const safeFile = getSafeUploadFileName(fileName, kind === "artwork" ? "artwork" : "preview.wav");
+
+  return `store-media/${kind}/${safeProduct}/${Date.now()}-${safeFile}`;
+}
+
+function getContentTypeExtension(contentType: string, fallbackFileName = "") {
+  const extensionMatch = fallbackFileName.toLowerCase().match(/\.[a-z0-9]+$/);
+
+  if (extensionMatch) {
+    return extensionMatch[0].replace(".", "");
+  }
+
+  switch (contentType.toLowerCase()) {
+    case "image/png":
+      return "png";
+    case "image/jpeg":
+      return "jpg";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
+    case "image/avif":
+      return "avif";
+    case "audio/mpeg":
+    case "audio/mp3":
+      return "mp3";
+    case "audio/mp4":
+    case "audio/x-m4a":
+      return "m4a";
+    case "audio/aac":
+      return "aac";
+    case "audio/ogg":
+      return "ogg";
+    default:
+      return "wav";
+  }
+}
+
+function getStoreMediaContentType(fileName: string, fallbackType = "") {
+  const fileType = fallbackType.toLowerCase();
+  const lowerFileName = fileName.toLowerCase();
+
+  if (fileType.startsWith("image/") || fileType.startsWith("audio/")) {
+    return fileType;
+  }
+
+  if (/\.(png)$/i.test(lowerFileName)) {
+    return "image/png";
+  }
+
+  if (/\.(jpe?g)$/i.test(lowerFileName)) {
+    return "image/jpeg";
+  }
+
+  if (/\.(webp)$/i.test(lowerFileName)) {
+    return "image/webp";
+  }
+
+  if (/\.(gif)$/i.test(lowerFileName)) {
+    return "image/gif";
+  }
+
+  if (/\.(avif)$/i.test(lowerFileName)) {
+    return "image/avif";
+  }
+
+  if (/\.(mp3)$/i.test(lowerFileName)) {
+    return "audio/mpeg";
+  }
+
+  if (/\.(m4a)$/i.test(lowerFileName)) {
+    return "audio/mp4";
+  }
+
+  if (/\.(aac)$/i.test(lowerFileName)) {
+    return "audio/aac";
+  }
+
+  if (/\.(ogg)$/i.test(lowerFileName)) {
+    return "audio/ogg";
+  }
+
+  return "audio/wav";
+}
+
+async function uploadStoreMedia(
+  product: StoreProduct,
+  kind: "artwork" | "previews",
+  body: File | Blob,
+  fileName: string,
+  contentType: string
+) {
+  const blob = await upload(getStoreMediaPathname(product, fileName, kind), body, {
+    access: "public",
+    contentType,
+    handleUploadUrl: "/api/uploads/store-media",
+    clientPayload: JSON.stringify({
+      originalName: fileName,
+      contentType,
+    }),
+  });
+
+  return blob.url;
+}
+
 function createNewSiteElement(placement: StoreSiteElementPlacement): StoreSiteElement {
   const timestamp = Date.now().toString(36);
   const isWorkflow = placement === "homepage-workflow";
@@ -124,13 +245,73 @@ function createNewSiteElement(placement: StoreSiteElementPlacement): StoreSiteEl
   };
 }
 
-function fileToDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Failed to read file."));
-    reader.readAsDataURL(file);
-  });
+function isDataUrl(value: string | undefined) {
+  return Boolean(value?.startsWith("data:"));
+}
+
+async function dataUrlToBlob(dataUrl: string) {
+  const response = await fetch(dataUrl);
+
+  if (!response.ok) {
+    throw new Error("Could not prepare embedded media for publishing.");
+  }
+
+  return response.blob();
+}
+
+async function publishEmbeddedProductMedia(products: StoreProduct[]) {
+  let convertedCount = 0;
+  const publishedProducts: StoreProduct[] = [];
+
+  for (const product of products) {
+    let nextProduct = product;
+    const safeProduct = createSlug(product.name || product.slug || product.id) || product.category;
+
+    if (isDataUrl(product.artwork)) {
+      const artworkBlob = await dataUrlToBlob(product.artwork || "");
+      const contentType = artworkBlob.type || "image/png";
+      const extension = getContentTypeExtension(contentType);
+      const artworkUrl = await uploadStoreMedia(
+        product,
+        "artwork",
+        artworkBlob,
+        `${safeProduct}-artwork.${extension}`,
+        contentType
+      );
+
+      nextProduct = {
+        ...nextProduct,
+        artwork: artworkUrl,
+      };
+      convertedCount += 1;
+    }
+
+    if (isDataUrl(product.audioPreview)) {
+      const previewBlob = await dataUrlToBlob(product.audioPreview || "");
+      const contentType = previewBlob.type || "audio/wav";
+      const extension = getContentTypeExtension(contentType);
+      const previewUrl = await uploadStoreMedia(
+        nextProduct,
+        "previews",
+        previewBlob,
+        `${safeProduct}-preview.${extension}`,
+        contentType
+      );
+
+      nextProduct = {
+        ...nextProduct,
+        audioPreview: previewUrl,
+      };
+      convertedCount += 1;
+    }
+
+    publishedProducts.push(nextProduct);
+  }
+
+  return {
+    products: publishedProducts,
+    convertedCount,
+  };
 }
 
 function getAudioContext() {
@@ -268,16 +449,7 @@ function audioBufferToWavBlob(audioBuffer: AudioBuffer, startTime: number, durat
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-function blobToDataUrl(blob: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Failed to prepare the generated preview."));
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function createBeatPreviewDataUrl(file: File) {
+async function createBeatPreviewBlob(file: File) {
   const audioContext = getAudioContext();
 
   try {
@@ -286,10 +458,9 @@ async function createBeatPreviewDataUrl(file: File) {
     const previewDuration = Math.min(MAX_PROTECTED_SAMPLE_SECONDS, audioBuffer.duration);
     const previewStart = pickPreviewStartTime(audioBuffer, previewDuration);
     const previewBlob = audioBufferToWavBlob(audioBuffer, previewStart, previewDuration);
-    const dataUrl = await blobToDataUrl(previewBlob);
 
     return {
-      dataUrl,
+      blob: previewBlob,
       previewDuration,
       previewStart,
       sourceDuration: audioBuffer.duration,
@@ -383,14 +554,11 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
   useEffect(() => {
     async function loadContent() {
-      const [storedProducts, storedSettings] = await Promise.all([
-        getStoredProducts(),
-        getStoredSettings(),
-      ]);
+      const storedContent = await getStoredContent();
 
-      setProducts(storedProducts);
-      setSettings(storedSettings);
-      setStatusMessage(getCatalogStatusMessage(storedProducts));
+      setProducts(storedContent.products);
+      setSettings(storedContent.settings);
+      setStatusMessage(getCatalogStatusMessage(storedContent.products));
     }
 
     loadContent().catch(() => {
@@ -473,8 +641,11 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       };
     });
 
-    setProducts(nextProducts);
-    await saveStoredProducts(nextProducts.map(normalizeProductDraft));
+    const mediaReadyContent = await publishEmbeddedProductMedia(nextProducts);
+    const normalizedProducts = mediaReadyContent.products.map(normalizeProductDraft);
+
+    setProducts(normalizedProducts);
+    await saveStoredProducts(normalizedProducts);
   }
 
   function updateDeliverables(index: number, value: string) {
@@ -547,13 +718,29 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
         }
 
         setStatusMessage("Creating a protected preview from the strongest part of the beat...");
-        const preview = await createBeatPreviewDataUrl(file);
+        const preview = await createBeatPreviewBlob(file);
         const currentProduct = products[index];
+        const nextName =
+          currentProduct.name && currentProduct.name !== "New Beat"
+            ? currentProduct.name
+            : getBeatNameFromFileName(file.name) || "New Beat";
+        const mediaProduct = {
+          ...currentProduct,
+          name: nextName,
+        };
+        const previewFileName = `${createSlug(nextName) || "beat"}-preview.wav`;
+
+        setStatusMessage("Uploading the protected preview to the public store media library...");
+        const previewUrl = await uploadStoreMedia(
+          mediaProduct,
+          "previews",
+          preview.blob,
+          previewFileName,
+          "audio/wav"
+        );
+
         await updateProductAndSave(index, {
-          name:
-            currentProduct.name && currentProduct.name !== "New Beat"
-              ? currentProduct.name
-              : getBeatNameFromFileName(file.name) || "New Beat",
+          name: nextName,
           genre: currentProduct.genre && currentProduct.genre !== "Genre" ? currentProduct.genre : "Beat",
           description:
             currentProduct.description ||
@@ -562,7 +749,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
           deliverables: currentProduct.deliverables.length
             ? currentProduct.deliverables
             : ["Full beat file delivered after purchase", "Non-exclusive beat license"],
-          audioPreview: preview.dataUrl,
+          audioPreview: previewUrl,
           previewDuration: preview.previewDuration,
         });
         setStatusMessage(
@@ -600,13 +787,25 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
           deliveryFileUrl: blob.downloadUrl || blob.url,
           deliveryFileName: file.name,
           deliveryFileSize: file.size,
+          deliveryFileReady: true,
         });
         setStatusMessage("Full beat delivery file uploaded and saved. Paid customers will receive this link after checkout.");
         return;
       }
 
-      const dataUrl = await fileToDataUrl(file);
-      await updateProductAndSave(index, { artwork: dataUrl });
+      const currentProduct = products[index];
+      const contentType = getStoreMediaContentType(file.name, file.type);
+
+      setStatusMessage("Uploading artwork to the public store media library...");
+      const artworkUrl = await uploadStoreMedia(
+        currentProduct,
+        "artwork",
+        file,
+        file.name,
+        contentType
+      );
+
+      await updateProductAndSave(index, { artwork: artworkUrl });
       setStatusMessage("Artwork loaded and saved. Add a protected sample if this beat is not live yet.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed.";
@@ -620,12 +819,19 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     setSaving(true);
 
     try {
-      const normalizedProducts = products.map(normalizeProductDraft);
+      const mediaReadyContent = await publishEmbeddedProductMedia(products);
+      const normalizedProducts = mediaReadyContent.products.map(normalizeProductDraft);
       const readyCount = normalizedProducts.filter(isProductReadyForStorefront).length;
       const draftCount = normalizedProducts.length - readyCount;
 
-      await Promise.all([saveStoredProducts(normalizedProducts), saveStoredSettings(settings)]);
-      setProducts(normalizedProducts);
+      if (mediaReadyContent.convertedCount) {
+        setProducts(normalizedProducts);
+        setStatusMessage(`Published ${mediaReadyContent.convertedCount} embedded media file(s) before saving the public catalog.`);
+      }
+
+      const savedContent = await saveStoredContent(normalizedProducts, settings);
+      setProducts(savedContent.products);
+      setSettings(savedContent.settings);
       setStatusMessage(
         draftCount
           ? `Saved. ${readyCount} item(s) are ready for the storefront and ${draftCount} draft item(s) stay hidden until they are complete.`
@@ -659,17 +865,23 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     setStripeSyncing(true);
 
     try {
-      const normalizedProducts = products.map(normalizeProductDraft);
+      const mediaReadyContent = await publishEmbeddedProductMedia(products);
+      const normalizedProducts = mediaReadyContent.products.map(normalizeProductDraft);
       const stripeSyncableProducts = normalizedProducts.filter(
         (product) => product.name && product.price >= 0.5
       );
+
+      if (mediaReadyContent.convertedCount) {
+        setProducts(normalizedProducts);
+        setStatusMessage(`Published ${mediaReadyContent.convertedCount} embedded media file(s) before syncing Stripe.`);
+      }
 
       if (!stripeSyncableProducts.length) {
         setStatusMessage("Nothing can sync to Stripe yet. Add a product name and set a price of at least $0.50 first.");
         return;
       }
 
-      await Promise.all([saveStoredProducts(normalizedProducts), saveStoredSettings(settings)]);
+      await saveStoredContent(normalizedProducts, settings);
 
       const response = await fetch("/api/control-center/stripe/sync", {
         method: "POST",
@@ -1152,6 +1364,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                             deliveryFileUrl: event.target.value === "service" ? "" : product.deliveryFileUrl,
                             deliveryFileName: event.target.value === "service" ? "" : product.deliveryFileName,
                             deliveryFileSize: event.target.value === "service" ? undefined : product.deliveryFileSize,
+                            deliveryFileReady: event.target.value === "service" ? false : product.deliveryFileReady,
                             soldOut: event.target.value === "service" ? false : product.soldOut,
                           })
                         }

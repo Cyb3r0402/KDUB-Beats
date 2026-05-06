@@ -14,6 +14,7 @@ export interface StoreProduct {
   deliveryFileUrl?: string;
   deliveryFileName?: string;
   deliveryFileSize?: number;
+  deliveryFileReady?: boolean;
   soldOut?: boolean;
   deliverables: string[];
   badge?: string;

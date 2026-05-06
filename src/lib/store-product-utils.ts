@@ -44,6 +44,7 @@ export function normalizeProductDraft(product: StoreProduct): StoreProduct {
       typeof product.deliveryFileSize === "number" && Number.isFinite(product.deliveryFileSize)
         ? product.deliveryFileSize
         : undefined,
+    deliveryFileReady: product.deliveryFileReady === true || Boolean(cleanValue(product.deliveryFileUrl)),
     soldOut: product.soldOut === true,
     price:
       isUploadedBeat && (!Number.isFinite(product.price) || Number(product.price) < MIN_CHECKOUT_PRICE)
@@ -111,7 +112,7 @@ export function getProductReadinessIssues(product: StoreProduct) {
       issues.push("Upload a protected sample.");
     }
 
-    if (!normalizedProduct.deliveryFileUrl) {
+    if (!normalizedProduct.deliveryFileUrl && !normalizedProduct.deliveryFileReady) {
       issues.push("Upload the full beat delivery file.");
     }
 
