@@ -99,6 +99,12 @@ export default function SessionUploadForm({
     setErrorMessage("");
     setSuccessMessage(EMPTY_SUCCESS);
 
+    if (!paymentReady || !paymentReference) {
+      setErrorMessage("Payment must be confirmed before sending session files.");
+      resetFileSelection();
+      return;
+    }
+
     if (!nextFiles.length) {
       resetFileSelection();
       return;
@@ -142,6 +148,11 @@ export default function SessionUploadForm({
       return;
     }
 
+    if (!paymentReady || !paymentReference) {
+      setErrorMessage("Payment must be confirmed before sending session files.");
+      return;
+    }
+
     if (!selectedFiles.length) {
       setErrorMessage("Add stems, a zipped session, or a beat file before sending the project.");
       return;
@@ -170,6 +181,7 @@ export default function SessionUploadForm({
           clientPayload: JSON.stringify({
             originalName: file.name,
             contentType,
+            paymentReference,
           }),
           onUploadProgress: ({ percentage }) => {
             setRowStatus(rowId, "uploading", Math.max(1, Math.round(percentage)));
@@ -209,12 +221,21 @@ export default function SessionUploadForm({
       const result = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(result?.error || "The upload finished, but the delivery email could not be sent.");
+        throw new Error(result?.error || "The upload finished, but the studio could not receive the session details.");
       }
 
-      setSuccessMessage(
-        "Session uploaded. KDUB got the files and delivery details by email, so the mix can move into the queue."
-      );
+      if (result?.savedToInbox && result?.notificationSent === false) {
+        setSuccessMessage(
+          "Session uploaded. KDUB has the files in the studio inbox now, even though email alerts are not connected yet."
+        );
+      } else if (result?.savedToInbox) {
+        setSuccessMessage("Session uploaded. KDUB has the files in the studio inbox and by email, so the mix can move into the queue.");
+      } else {
+        setSuccessMessage(
+          "Session uploaded. KDUB got the files and delivery details by email, so the mix can move into the queue."
+        );
+      }
+
       resetFileSelection();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to upload the session files.";
@@ -237,7 +258,7 @@ export default function SessionUploadForm({
           <div className="session-upload-badges">
             <span>{selectedServiceName || "Custom Studio Work"}</span>
             <span>ZIP + Audio Uploads</span>
-            <span>Email Delivery Alert</span>
+            <span>Studio Inbox + Alerts</span>
           </div>
           <div className="session-upload-note-card">
             <p className="eyebrow">Best Results</p>
@@ -261,10 +282,23 @@ export default function SessionUploadForm({
           </p>
         ) : (
           <p className="session-upload-banner">
-            Want to get the session organized early? Upload the files now and they’ll still land in your studio inbox.
+            Payment is required before this form unlocks, which keeps the studio inbox clear of spam.
           </p>
         )}
 
+        {!paymentReady ? (
+          <div className="session-upload-locked">
+            <p className="eyebrow">Locked Until Checkout</p>
+            <h3>Choose a tier and complete payment first.</h3>
+            <p>
+              Once payment clears, this upload form unlocks automatically and your files can go
+              straight into the studio inbox.
+            </p>
+            <a href="#service-tiers" className="button button-primary full-width">
+              Choose A Tier
+            </a>
+          </div>
+        ) : (
         <form className="session-upload-form" onSubmit={handleSubmit}>
           <div className="session-upload-grid">
             <label className="session-upload-field">
@@ -395,10 +429,11 @@ export default function SessionUploadForm({
           </div>
 
           <p className="session-upload-fineprint">
-            Every completed upload sends a delivery email to the studio so the session can be picked
-            up fast. Use the same email from checkout if you already paid for a tier.
+            Completed uploads are accepted only after Stripe confirms payment, then saved to the
+            studio inbox with email alerts as a backup when configured.
           </p>
         </form>
+        )}
       </article>
     </section>
   );

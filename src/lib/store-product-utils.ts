@@ -24,17 +24,37 @@ export function getNormalizedDeliverables(deliverables: string[]) {
 }
 
 export function normalizeProductDraft(product: StoreProduct): StoreProduct {
+  const isUploadedBeat = product.category === "beat" && cleanValue(product.audioPreview);
+  const deliverables = getNormalizedDeliverables(product.deliverables);
+
   return {
     ...product,
     name: cleanValue(product.name),
     slug: cleanValue(product.slug),
-    genre: cleanValue(product.genre),
-    description: cleanValue(product.description),
+    genre: cleanValue(product.genre) || (isUploadedBeat ? "Beat" : ""),
+    description:
+      cleanValue(product.description) ||
+      (isUploadedBeat ? "Protected preview available. Purchase includes the full beat delivery." : ""),
     badge: cleanValue(product.badge),
     artwork: cleanValue(product.artwork),
     audioPreview: cleanValue(product.audioPreview),
-    price: Number.isFinite(product.price) ? Number(product.price) : 0,
-    deliverables: getNormalizedDeliverables(product.deliverables),
+    deliveryFileUrl: cleanValue(product.deliveryFileUrl),
+    deliveryFileName: cleanValue(product.deliveryFileName),
+    deliveryFileSize:
+      typeof product.deliveryFileSize === "number" && Number.isFinite(product.deliveryFileSize)
+        ? product.deliveryFileSize
+        : undefined,
+    soldOut: product.soldOut === true,
+    price:
+      isUploadedBeat && (!Number.isFinite(product.price) || Number(product.price) < MIN_CHECKOUT_PRICE)
+        ? 29.99
+        : Number.isFinite(product.price)
+          ? Number(product.price)
+          : 0,
+    deliverables:
+      isUploadedBeat && !deliverables.length
+        ? ["Full beat file delivered after purchase", "Non-exclusive beat license"]
+        : deliverables,
   };
 }
 
@@ -87,12 +107,12 @@ export function getProductReadinessIssues(product: StoreProduct) {
       issues.push("Add a genre or vibe label.");
     }
 
-    if (!normalizedProduct.artwork) {
-      issues.push("Upload beat artwork.");
-    }
-
     if (!normalizedProduct.audioPreview) {
       issues.push("Upload a protected sample.");
+    }
+
+    if (!normalizedProduct.deliveryFileUrl) {
+      issues.push("Upload the full beat delivery file.");
     }
 
     if (!normalizedProduct.previewDuration || !Number.isFinite(normalizedProduct.previewDuration)) {

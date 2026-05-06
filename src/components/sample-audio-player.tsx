@@ -52,13 +52,12 @@ export default function SampleAudioPlayer({
         ref={audioRef}
         controls
         preload="metadata"
+        src={src}
         className={className}
         controlsList="nodownload noplaybackrate noremoteplayback"
         onTimeUpdate={stopAtLimit}
         onSeeking={handleSeeking}
-      >
-        <source src={src} type="audio/mpeg" />
-      </audio>
+      />
       <p className="sample-player-note">{message}</p>
     </div>
   );

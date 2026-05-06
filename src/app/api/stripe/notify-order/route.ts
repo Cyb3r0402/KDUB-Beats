@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export async function POST(request: NextRequest) {
   if (!stripe) {
     return NextResponse.json(
-      { error: "Missing STRIPE_SECRET_KEY. Add it to .env.local before using checkout." },
+      { error: "Missing STRIPE_SECRET_KEY. Add it to your environment variables before using checkout." },
       { status: 500 }
     );
   }

@@ -5,7 +5,7 @@ import {
   isAuthorizedControlCenterSession,
 } from "@/lib/control-center-auth";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isLoginPage = pathname === "/studio-session";
 

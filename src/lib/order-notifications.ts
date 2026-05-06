@@ -93,6 +93,8 @@ export async function sendOrderNotificationEmail(paymentIntent: Stripe.PaymentIn
   const dashboardUrl = getDashboardPaymentUrl(paymentIntent.id);
   const stripeProductId = metadata.stripeProductId || "Not synced";
   const stripePriceId = metadata.stripePriceId || "Not synced";
+  const deliveryFileUrl = metadata.deliveryFileUrl || "";
+  const deliveryFileName = metadata.deliveryFileName || "Full beat delivery file";
   const from = process.env.ORDER_NOTIFICATION_FROM || process.env.SMTP_USER || recipient;
 
   const text = [
@@ -107,6 +109,7 @@ export async function sendOrderNotificationEmail(paymentIntent: Stripe.PaymentIn
     `Payment Intent: ${paymentIntent.id}`,
     `Stripe Product ID: ${stripeProductId}`,
     `Stripe Price ID: ${stripePriceId}`,
+    deliveryFileUrl ? `Delivery File: ${deliveryFileName}\n${deliveryFileUrl}` : "Delivery File: Not attached",
     `Stripe Dashboard: ${dashboardUrl}`,
   ].join("\n");
 
@@ -125,6 +128,11 @@ export async function sendOrderNotificationEmail(paymentIntent: Stripe.PaymentIn
           <tr><td style="padding:8px 12px;border:1px solid #d7e6f5;"><strong>Payment Intent</strong></td><td style="padding:8px 12px;border:1px solid #d7e6f5;">${escapeHtml(paymentIntent.id)}</td></tr>
           <tr><td style="padding:8px 12px;border:1px solid #d7e6f5;"><strong>Stripe Product ID</strong></td><td style="padding:8px 12px;border:1px solid #d7e6f5;">${escapeHtml(stripeProductId)}</td></tr>
           <tr><td style="padding:8px 12px;border:1px solid #d7e6f5;"><strong>Stripe Price ID</strong></td><td style="padding:8px 12px;border:1px solid #d7e6f5;">${escapeHtml(stripePriceId)}</td></tr>
+          <tr><td style="padding:8px 12px;border:1px solid #d7e6f5;"><strong>Delivery File</strong></td><td style="padding:8px 12px;border:1px solid #d7e6f5;">${
+            deliveryFileUrl
+              ? `<a href="${deliveryFileUrl}" target="_blank" rel="noreferrer">${escapeHtml(deliveryFileName)}</a>`
+              : "Not attached"
+          }</td></tr>
         </tbody>
       </table>
       <p style="margin:16px 0 0;">
@@ -138,6 +146,55 @@ export async function sendOrderNotificationEmail(paymentIntent: Stripe.PaymentIn
     from,
     replyTo: customerEmail.includes("@") ? customerEmail : undefined,
     subject: `New KDUB ${category} order: ${productName}`,
+    text,
+    html,
+  });
+}
+
+async function sendCustomerBeatDeliveryEmail(paymentIntent: Stripe.PaymentIntent) {
+  const transporter = getMailTransporter();
+
+  if (!transporter) {
+    throw new Error("Missing SMTP configuration. Add SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS.");
+  }
+
+  const metadata = paymentIntent.metadata || {};
+  const customerEmail = metadata.email || paymentIntent.receipt_email || "";
+  const productName = metadata.productName || "your beat";
+  const deliveryFileUrl = metadata.deliveryFileUrl || "";
+  const deliveryFileName = metadata.deliveryFileName || "Full beat download";
+  const from = process.env.ORDER_NOTIFICATION_FROM || process.env.SMTP_USER || DEFAULT_ORDER_NOTIFICATION_TO;
+
+  if (metadata.category !== "beat" || !customerEmail.includes("@") || !deliveryFileUrl) {
+    return;
+  }
+
+  const text = [
+    `Thanks for purchasing ${productName}.`,
+    "",
+    "Your beat download is ready:",
+    `${deliveryFileName}: ${deliveryFileUrl}`,
+    "",
+    "Keep this email for your records.",
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#07111a;">
+      <h2 style="margin:0 0 16px;">Your KDUB Beat Is Ready</h2>
+      <p style="margin:0 0 16px;">Thanks for purchasing ${escapeHtml(productName)}.</p>
+      <p style="margin:0 0 18px;">
+        <a href="${deliveryFileUrl}" target="_blank" rel="noreferrer" style="display:inline-block;padding:12px 16px;background:#07111a;color:#ffffff;text-decoration:none;border-radius:8px;">
+          Download ${escapeHtml(deliveryFileName)}
+        </a>
+      </p>
+      <p style="margin:0;">Keep this email for your records.</p>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    to: customerEmail,
+    from,
+    subject: `Your KDUB beat download: ${productName}`,
     text,
     html,
   });
@@ -166,6 +223,7 @@ export async function notifyOrderFulfillment(paymentIntentId: string, clientSecr
   }
 
   await sendOrderNotificationEmail(paymentIntent);
+  await sendCustomerBeatDeliveryEmail(paymentIntent);
 
   const updatedPaymentIntent = await stripe.paymentIntents.update(paymentIntent.id, {
     metadata: {

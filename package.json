@@ -5,7 +5,7 @@
     "dev": "next dev --turbo",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@stripe/react-stripe-js": "^5.4.1",
@@ -32,6 +32,7 @@
     "@types/react": "^19.2.9",
     "dotenv": "^17.2.3",
     "eslint": "^9.39.2",
+    "eslint-config-next": "^16.2.4",
     "typescript": "5.9.3"
   }
 }

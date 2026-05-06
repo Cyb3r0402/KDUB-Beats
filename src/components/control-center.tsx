@@ -1,8 +1,11 @@
 "use client";
 
+import { upload } from "@vercel/blob/client";
+import Image from "next/image";
 import { ChangeEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import SampleAudioPlayer from "@/components/sample-audio-player";
+import { formatFileSize } from "@/lib/session-upload";
 import type { StripeMode } from "@/lib/stripe";
 import {
   getStoredProducts,
@@ -14,7 +17,6 @@ import {
 import { defaultStoreProducts, defaultStoreSettings } from "@/lib/store-data";
 import {
   getArtworkFileIssue,
-  getPreviewSampleFileIssue,
   getProductReadinessIssues,
   getReadyBeatProducts,
   getReadyServiceProducts,
@@ -22,7 +24,17 @@ import {
   MAX_PROTECTED_SAMPLE_SECONDS,
   normalizeProductDraft,
 } from "@/lib/store-product-utils";
-import type { ProductCategory, StoreProduct, StoreSettings } from "@/types/store";
+import type {
+  SessionUploadSystemStatus,
+  StoredSessionSubmission,
+} from "@/lib/session-submissions";
+import type {
+  ProductCategory,
+  StoreProduct,
+  StoreSettings,
+  StoreSiteElement,
+  StoreSiteElementPlacement,
+} from "@/types/store";
 
 function createSlug(value: string) {
   return value
@@ -30,6 +42,15 @@ function createSlug(value: string) {
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function getBeatNameFromFileName(fileName: string) {
+  return fileName
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function createNewProduct(category: ProductCategory): StoreProduct {
@@ -40,14 +61,66 @@ function createNewProduct(category: ProductCategory): StoreProduct {
     slug: `${category}-${timestamp}`,
     name: category === "beat" ? "New Beat" : "New Service",
     category,
-    genre: category === "beat" ? "Genre" : "",
-    description: "",
-    price: 0,
+    genre: category === "beat" ? "Beat" : "",
+    description:
+      category === "beat"
+        ? "Protected preview available. Purchase includes the full beat delivery."
+        : "",
+    price: category === "beat" ? 29.99 : 0,
     artwork: "",
     audioPreview: "",
     previewDuration: undefined,
-    deliverables: [],
+    deliveryFileUrl: "",
+    deliveryFileName: "",
+    deliveryFileSize: undefined,
+    soldOut: false,
+    deliverables:
+      category === "beat"
+        ? ["Full beat file delivered after purchase", "Non-exclusive beat license"]
+        : [],
     badge: "",
+  };
+}
+
+function getBeatDeliveryFileIssue(file: File) {
+  const fileType = (file.type || "").toLowerCase();
+  const fileName = file.name.toLowerCase();
+  const isSupportedDeliveryFile =
+    fileType.startsWith("audio/") ||
+    fileType === "application/zip" ||
+    fileType === "application/x-zip-compressed" ||
+    /\.(zip|wav|wave|aif|aiff|flac|mp3|m4a|aac|ogg)$/i.test(fileName);
+
+  if (isSupportedDeliveryFile) {
+    return "";
+  }
+
+  return "Delivery uploads must be ZIP or audio files such as WAV, AIFF, FLAC, MP3, M4A, AAC, or OGG.";
+}
+
+function getBeatDeliveryPathname(product: StoreProduct, fileName: string) {
+  const safeProduct = createSlug(product.name || product.slug || product.id) || "beat";
+  const safeFile = fileName
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9.]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return `beat-delivery/${safeProduct}/${Date.now()}-${safeFile || "full-beat"}`;
+}
+
+function createNewSiteElement(placement: StoreSiteElementPlacement): StoreSiteElement {
+  const timestamp = Date.now().toString(36);
+  const isWorkflow = placement === "homepage-workflow";
+
+  return {
+    id: `site-element-${timestamp}`,
+    placement,
+    label: isWorkflow ? "New Workflow Step" : "New Homepage Card",
+    eyebrow: isWorkflow ? "Next" : "Site Card",
+    title: isWorkflow ? "New Workflow Step" : "New Site Element",
+    description: "",
+    visible: true,
   };
 }
 
@@ -60,31 +133,170 @@ function fileToDataUrl(file: File) {
   });
 }
 
-function getAudioDuration(file: File) {
-  return new Promise<number>((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const audio = document.createElement("audio");
+function getAudioContext() {
+  const browserWindow = window as Window & {
+    AudioContext?: typeof AudioContext;
+    webkitAudioContext?: typeof AudioContext;
+  };
+  const AudioContextConstructor = browserWindow.AudioContext || browserWindow.webkitAudioContext;
 
-    audio.preload = "metadata";
-    audio.src = objectUrl;
+  if (!AudioContextConstructor) {
+    throw new Error("This browser cannot create beat previews. Try a current Chrome, Edge, or Safari browser.");
+  }
 
-    audio.onloadedmetadata = () => {
-      const duration = audio.duration;
-      URL.revokeObjectURL(objectUrl);
+  return new AudioContextConstructor();
+}
 
-      if (!Number.isFinite(duration)) {
-        reject(new Error("Could not read audio length."));
-        return;
+function getBeatAudioUploadIssue(file: File) {
+  const fileType = (file.type || "").toLowerCase();
+  const fileName = file.name.toLowerCase();
+  const isSupportedAudio =
+    fileType.startsWith("audio/") || /\.(wav|wave|aif|aiff|flac|mp3|m4a|aac|ogg)$/i.test(fileName);
+
+  if (isSupportedAudio) {
+    return "";
+  }
+
+  return "Upload a beat audio file such as WAV, AIFF, FLAC, MP3, M4A, AAC, or OGG.";
+}
+
+function pickPreviewStartTime(audioBuffer: AudioBuffer, previewSeconds: number) {
+  const duration = audioBuffer.duration;
+  const previewLength = Math.min(previewSeconds, duration);
+
+  if (duration <= previewLength) {
+    return 0;
+  }
+
+  const sampleRate = audioBuffer.sampleRate;
+  const channelData = Array.from({ length: audioBuffer.numberOfChannels }, (_, channel) =>
+    audioBuffer.getChannelData(channel)
+  );
+  const edgePadding = Math.min(8, Math.max(0, (duration - previewLength) / 3));
+  const scanStartFrame = Math.floor(edgePadding * sampleRate);
+  const scanEndFrame = Math.max(
+    scanStartFrame,
+    Math.floor((duration - previewLength - edgePadding) * sampleRate)
+  );
+  const segmentFrames = Math.floor(previewLength * sampleRate);
+  const stepFrames = Math.max(1, Math.floor(sampleRate * 0.5));
+  let bestFrame = scanStartFrame;
+  let bestScore = -Infinity;
+
+  for (let frame = scanStartFrame; frame <= scanEndFrame; frame += stepFrames) {
+    let sumSquares = 0;
+    let peak = 0;
+    const endFrame = Math.min(frame + segmentFrames, audioBuffer.length);
+
+    for (const channel of channelData) {
+      for (let sampleIndex = frame; sampleIndex < endFrame; sampleIndex += 128) {
+        const sample = channel[sampleIndex] || 0;
+        sumSquares += sample * sample;
+        peak = Math.max(peak, Math.abs(sample));
       }
+    }
 
-      resolve(duration);
-    };
+    const sampleCount = Math.max(1, ((endFrame - frame) / 128) * channelData.length);
+    const rms = Math.sqrt(sumSquares / sampleCount);
+    const score = rms * 0.85 + peak * 0.15;
 
-    audio.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("Audio file could not be read."));
-    };
+    if (score > bestScore) {
+      bestScore = score;
+      bestFrame = frame;
+    }
+  }
+
+  return bestFrame / sampleRate;
+}
+
+function audioBufferToWavBlob(audioBuffer: AudioBuffer, startTime: number, duration: number) {
+  const sampleRate = audioBuffer.sampleRate;
+  const channelCount = Math.min(audioBuffer.numberOfChannels, 2);
+  const startFrame = Math.floor(startTime * sampleRate);
+  const frameCount = Math.min(Math.floor(duration * sampleRate), audioBuffer.length - startFrame);
+  const bytesPerSample = 2;
+  const blockAlign = channelCount * bytesPerSample;
+  const dataSize = frameCount * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const fadeFrames = Math.min(Math.floor(sampleRate * 0.25), Math.floor(frameCount / 2));
+  let offset = 0;
+
+  function writeString(value: string) {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+    offset += value.length;
+  }
+
+  writeString("RIFF");
+  view.setUint32(offset, 36 + dataSize, true);
+  offset += 4;
+  writeString("WAVE");
+  writeString("fmt ");
+  view.setUint32(offset, 16, true);
+  offset += 4;
+  view.setUint16(offset, 1, true);
+  offset += 2;
+  view.setUint16(offset, channelCount, true);
+  offset += 2;
+  view.setUint32(offset, sampleRate, true);
+  offset += 4;
+  view.setUint32(offset, sampleRate * blockAlign, true);
+  offset += 4;
+  view.setUint16(offset, blockAlign, true);
+  offset += 2;
+  view.setUint16(offset, bytesPerSample * 8, true);
+  offset += 2;
+  writeString("data");
+  view.setUint32(offset, dataSize, true);
+  offset += 4;
+
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    const fadeIn = fadeFrames ? Math.min(1, frame / fadeFrames) : 1;
+    const fadeOut = fadeFrames ? Math.min(1, (frameCount - frame - 1) / fadeFrames) : 1;
+    const gain = Math.min(fadeIn, fadeOut);
+
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      const sample = audioBuffer.getChannelData(channel)[startFrame + frame] || 0;
+      const clamped = Math.max(-1, Math.min(1, sample * gain));
+      view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+      offset += 2;
+    }
+  }
+
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to prepare the generated preview."));
+    reader.readAsDataURL(blob);
   });
+}
+
+async function createBeatPreviewDataUrl(file: File) {
+  const audioContext = getAudioContext();
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    const previewDuration = Math.min(MAX_PROTECTED_SAMPLE_SECONDS, audioBuffer.duration);
+    const previewStart = pickPreviewStartTime(audioBuffer, previewDuration);
+    const previewBlob = audioBufferToWavBlob(audioBuffer, previewStart, previewDuration);
+    const dataUrl = await blobToDataUrl(previewBlob);
+
+    return {
+      dataUrl,
+      previewDuration,
+      previewStart,
+      sourceDuration: audioBuffer.duration,
+    };
+  } finally {
+    await audioContext.close().catch(() => undefined);
+  }
 }
 
 function formatDuration(seconds: number | undefined) {
@@ -93,6 +305,19 @@ function formatDuration(seconds: number | undefined) {
   }
 
   return `${seconds.toFixed(1)}s`;
+}
+
+function formatSubmissionTimestamp(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Just now";
+  }
+
+  return date.toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 function getCatalogStatusMessage(products: StoreProduct[]) {
@@ -137,8 +362,12 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
   const [saving, setSaving] = useState(false);
   const [stripeSyncing, setStripeSyncing] = useState(false);
   const [statusMessage, setStatusMessage] = useState(
-    "Beats only go live from uploads made here. Use MP3, M4A, AAC, or OGG samples only, and anything longer than 20 seconds is rejected."
+    "Beats only go live from uploads made here. Upload the full beat and the control center saves only a protected 20-second preview."
   );
+  const [sessionSubmissions, setSessionSubmissions] = useState<StoredSessionSubmission[]>([]);
+  const [sessionInboxStatus, setSessionInboxStatus] = useState<SessionUploadSystemStatus | null>(null);
+  const [sessionInboxLoading, setSessionInboxLoading] = useState(true);
+  const [sessionInboxError, setSessionInboxError] = useState("");
   const beatCount = products.filter((product) => product.category === "beat").length;
   const readyBeatCount = getReadyBeatProducts(products).length;
   const readyServiceCount = getReadyServiceProducts(products).length;
@@ -169,6 +398,48 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     });
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSessionInbox() {
+      setSessionInboxLoading(true);
+      setSessionInboxError("");
+
+      const response = await fetch("/api/control-center/session-submissions", {
+        cache: "no-store",
+      });
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(result?.error || "Could not load the studio inbox.");
+      }
+
+      if (!isMounted) {
+        return;
+      }
+
+      setSessionSubmissions(Array.isArray(result?.submissions) ? result.submissions : []);
+      setSessionInboxStatus(result?.systemStatus ?? null);
+    }
+
+    loadSessionInbox().catch((error) => {
+      if (!isMounted) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : "Could not load the studio inbox.";
+      setSessionInboxError(message);
+    }).finally(() => {
+      if (isMounted) {
+        setSessionInboxLoading(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   function updateProduct(index: number, patch: Partial<StoreProduct>) {
     setProducts((current) =>
       current.map((product, productIndex) => {
@@ -187,6 +458,25 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     );
   }
 
+  async function updateProductAndSave(index: number, patch: Partial<StoreProduct>) {
+    const nextProducts = products.map((product, productIndex) => {
+      if (productIndex !== index) {
+        return product;
+      }
+
+      const nextName = patch.name ?? product.name;
+
+      return {
+        ...product,
+        ...patch,
+        slug: createSlug(nextName || product.slug || product.id),
+      };
+    });
+
+    setProducts(nextProducts);
+    await saveStoredProducts(nextProducts.map(normalizeProductDraft));
+  }
+
   function updateDeliverables(index: number, value: string) {
     const deliverables = value
       .split("\n")
@@ -198,10 +488,39 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     });
   }
 
+  function updateSiteElement(index: number, patch: Partial<StoreSiteElement>) {
+    setSettings((current) => {
+      const siteElements = current.siteElements || [];
+
+      return {
+        ...current,
+        siteElements: siteElements.map((element, elementIndex) =>
+          elementIndex === index ? { ...element, ...patch } : element
+        ),
+      };
+    });
+  }
+
+  function removeSiteElement(index: number) {
+    setSettings((current) => ({
+      ...current,
+      siteElements: (current.siteElements || []).filter((_, elementIndex) => elementIndex !== index),
+    }));
+    setStatusMessage("Site element removed. Save changes to update the public page.");
+  }
+
+  function addSiteElement(placement: StoreSiteElementPlacement) {
+    setSettings((current) => ({
+      ...current,
+      siteElements: [...(current.siteElements || []), createNewSiteElement(placement)],
+    }));
+    setStatusMessage("New editable site element added. Fill it in, then save changes.");
+  }
+
   async function handleFileUpload(
     event: ChangeEvent<HTMLInputElement>,
     index: number,
-    field: "artwork" | "audioPreview"
+    field: "artwork" | "audioPreview" | "deliveryFile"
   ) {
     const file = event.target.files?.[0];
 
@@ -220,36 +539,75 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       }
 
       if (field === "audioPreview") {
-        const previewTypeIssue = getPreviewSampleFileIssue(file);
+        const previewTypeIssue = getBeatAudioUploadIssue(file);
 
         if (previewTypeIssue) {
           setStatusMessage(previewTypeIssue);
           return;
         }
 
-        const duration = await getAudioDuration(file);
-
-        if (duration > MAX_PROTECTED_SAMPLE_SECONDS) {
-          setStatusMessage(
-            `Preview rejected. Upload a ${MAX_PROTECTED_SAMPLE_SECONDS}-second sample or shorter, not the full beat.`
-          );
-          return;
-        }
-
-        const dataUrl = await fileToDataUrl(file);
-        updateProduct(index, {
-          audioPreview: dataUrl,
-          previewDuration: duration,
+        setStatusMessage("Creating a protected preview from the strongest part of the beat...");
+        const preview = await createBeatPreviewDataUrl(file);
+        const currentProduct = products[index];
+        await updateProductAndSave(index, {
+          name:
+            currentProduct.name && currentProduct.name !== "New Beat"
+              ? currentProduct.name
+              : getBeatNameFromFileName(file.name) || "New Beat",
+          genre: currentProduct.genre && currentProduct.genre !== "Genre" ? currentProduct.genre : "Beat",
+          description:
+            currentProduct.description ||
+            "Protected preview available. Purchase includes the full beat delivery.",
+          price: currentProduct.price >= 0.5 ? currentProduct.price : 29.99,
+          deliverables: currentProduct.deliverables.length
+            ? currentProduct.deliverables
+            : ["Full beat file delivered after purchase", "Non-exclusive beat license"],
+          audioPreview: preview.dataUrl,
+          previewDuration: preview.previewDuration,
         });
         setStatusMessage(
-          `Protected sample loaded at ${duration.toFixed(1)} seconds. Finish the remaining details and this beat can go live.`
+          preview.sourceDuration > MAX_PROTECTED_SAMPLE_SECONDS
+            ? `Protected ${preview.previewDuration.toFixed(1)}-second sample created from around ${formatDuration(
+                preview.previewStart
+              )}. The beat was saved to the storefront if all required details are ready.`
+            : `Protected sample loaded at ${preview.previewDuration.toFixed(1)} seconds. The beat was saved to the storefront if all required details are ready.`
         );
         return;
       }
 
+      if (field === "deliveryFile") {
+        const deliveryIssue = getBeatDeliveryFileIssue(file);
+
+        if (deliveryIssue) {
+          setStatusMessage(deliveryIssue);
+          return;
+        }
+
+        const currentProduct = products[index];
+        setStatusMessage("Uploading the full beat delivery file...");
+        const contentType = file.type || "application/octet-stream";
+        const blob = await upload(getBeatDeliveryPathname(currentProduct, file.name), file, {
+          access: "public",
+          contentType,
+          handleUploadUrl: "/api/uploads/beat-delivery",
+          clientPayload: JSON.stringify({
+            originalName: file.name,
+            contentType,
+          }),
+        });
+
+        await updateProductAndSave(index, {
+          deliveryFileUrl: blob.downloadUrl || blob.url,
+          deliveryFileName: file.name,
+          deliveryFileSize: file.size,
+        });
+        setStatusMessage("Full beat delivery file uploaded and saved. Paid customers will receive this link after checkout.");
+        return;
+      }
+
       const dataUrl = await fileToDataUrl(file);
-      updateProduct(index, { artwork: dataUrl });
-      setStatusMessage("Artwork loaded. Add pricing and a protected sample to make this beat storefront-ready.");
+      await updateProductAndSave(index, { artwork: dataUrl });
+      setStatusMessage("Artwork loaded and saved. Add a protected sample if this beat is not live yet.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed.";
       setStatusMessage(message);
@@ -302,13 +660,16 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
     try {
       const normalizedProducts = products.map(normalizeProductDraft);
-      const readyProducts = normalizedProducts.filter(isProductReadyForStorefront);
-      const skippedCount = normalizedProducts.length - readyProducts.length;
+      const stripeSyncableProducts = normalizedProducts.filter(
+        (product) => product.name && product.price >= 0.5
+      );
 
-      if (!readyProducts.length) {
-        setStatusMessage("Nothing is ready for Stripe yet. Finish the uploads and required details on at least one product first.");
+      if (!stripeSyncableProducts.length) {
+        setStatusMessage("Nothing can sync to Stripe yet. Add a product name and set a price of at least $0.50 first.");
         return;
       }
+
+      await Promise.all([saveStoredProducts(normalizedProducts), saveStoredSettings(settings)]);
 
       const response = await fetch("/api/control-center/stripe/sync", {
         method: "POST",
@@ -316,7 +677,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          products: readyProducts,
+          products: normalizedProducts,
         }),
       });
 
@@ -338,10 +699,21 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
       setProducts(mergedProducts);
       await saveStoredProducts(mergedProducts);
+      const skippedCount = Number(result.skippedCount || 0);
+      const failedCount = Number(result.failedCount || 0);
+      const failedNames = Array.isArray(result.failedProducts)
+        ? result.failedProducts
+            .map((product: { name?: string; error?: string }) =>
+              product.name && product.error ? `${product.name}: ${product.error}` : product.name || product.error
+            )
+            .filter(Boolean)
+            .slice(0, 2)
+            .join(" | ")
+        : "";
       setStatusMessage(
-        skippedCount
-          ? `Stripe synced for ${result.syncedCount} storefront-ready product(s). ${skippedCount} draft item(s) were skipped until their uploads and details are complete.`
-          : `Stripe synced for ${result.syncedCount} storefront-ready product(s).`
+        skippedCount || failedCount
+          ? `Stripe synced ${result.syncedCount} product(s). ${skippedCount} item(s) need a valid name and price. ${failedCount} item(s) failed in Stripe.${failedNames ? ` ${failedNames}` : ""}`
+          : `Stripe synced all ${result.syncedCount} product(s) with valid names and prices.`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Stripe sync failed.";
@@ -376,7 +748,14 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
             Sign Out
           </button>
           <div className="store-hero-logo-shell">
-            <img src="/branding/logo.png" alt="KDUB Beats logo" className="store-hero-logo" />
+            <Image
+              src="/branding/logo.png"
+              alt="KDUB Beats logo"
+              className="store-hero-logo"
+              width={220}
+              height={220}
+              priority
+            />
           </div>
           <div className="logo-chip-row store-chip-row" aria-hidden="true">
             <span>Beat Samples</span>
@@ -446,7 +825,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
               className="button button-secondary"
               href={stripeStatus.dashboardUrl}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
             >
               Open Stripe Dashboard
             </a>
@@ -539,6 +918,130 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
             </div>
           </section>
         </div>
+      </section>
+
+      <section className="section-block">
+        <div className="section-copy" data-reveal="fade">
+          <p className="eyebrow">Current Site Elements</p>
+          <h2>Edit or remove the cards already showing on the homepage.</h2>
+          <p>
+            These are live content blocks from the public site. Hidden or removed elements stop
+            rendering after you save.
+          </p>
+        </div>
+
+        <div className="panel control-toolbar" data-reveal="fade">
+          <div className="control-toolbar-copy">
+            <p className="eyebrow">Dynamic Content</p>
+            <h3>{settings.siteElements?.length || 0} editable homepage element(s).</h3>
+            <p>Feature cards and workflow steps are now driven from this admin panel.</p>
+          </div>
+          <div className="control-actions">
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => addSiteElement("homepage-feature")}
+            >
+              Add Homepage Card
+            </button>
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => addSiteElement("homepage-workflow")}
+            >
+              Add Workflow Step
+            </button>
+          </div>
+        </div>
+
+        {settings.siteElements?.length ? (
+          <div className="control-stack">
+            {settings.siteElements.map((element, index) => (
+              <article className="panel control-panel" key={element.id} data-reveal="zoom">
+                <div className="control-card-topline">
+                  <div className="control-title-stack">
+                    <p className="eyebrow">
+                      {element.placement === "homepage-workflow" ? "Homepage Workflow" : "Homepage Feature"}
+                    </p>
+                    <h3>{element.label || element.title || "Site Element"}</h3>
+                    <span className={`control-status-badge${element.visible ? " is-ready" : " is-draft"}`}>
+                      {element.visible ? "Visible" : "Hidden"}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-secondary control-delete"
+                    onClick={() => removeSiteElement(index)}
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                <div className="control-grid control-grid-product">
+                  <label>
+                    Element Type
+                    <select
+                      value={element.placement}
+                      onChange={(event) =>
+                        updateSiteElement(index, {
+                          placement: event.target.value as StoreSiteElementPlacement,
+                        })
+                      }
+                    >
+                      <option value="homepage-feature">Homepage Feature Card</option>
+                      <option value="homepage-workflow">Homepage Workflow Step</option>
+                    </select>
+                  </label>
+                  <label>
+                    Admin Label
+                    <input
+                      value={element.label}
+                      onChange={(event) => updateSiteElement(index, { label: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Small Label
+                    <input
+                      value={element.eyebrow}
+                      onChange={(event) => updateSiteElement(index, { eyebrow: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Visibility
+                    <select
+                      value={element.visible ? "visible" : "hidden"}
+                      onChange={(event) => updateSiteElement(index, { visible: event.target.value === "visible" })}
+                    >
+                      <option value="visible">Visible On Site</option>
+                      <option value="hidden">Hidden From Site</option>
+                    </select>
+                  </label>
+                  <label className="control-full">
+                    Title
+                    <input
+                      value={element.title}
+                      onChange={(event) => updateSiteElement(index, { title: event.target.value })}
+                    />
+                  </label>
+                  <label className="control-full">
+                    Description
+                    <textarea
+                      rows={3}
+                      value={element.description}
+                      onChange={(event) => updateSiteElement(index, { description: event.target.value })}
+                    />
+                  </label>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <article className="panel store-empty-state" data-reveal="fade">
+            <p className="eyebrow">No Site Elements</p>
+            <h3>Add a homepage card or workflow step to rebuild this section.</h3>
+            <p>Saved elements will render on the public homepage automatically.</p>
+          </article>
+        )}
       </section>
 
       <section className="section-block">
@@ -646,6 +1149,10 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                             artwork: event.target.value === "service" ? "" : product.artwork,
                             audioPreview: event.target.value === "service" ? "" : product.audioPreview,
                             previewDuration: event.target.value === "service" ? undefined : product.previewDuration,
+                            deliveryFileUrl: event.target.value === "service" ? "" : product.deliveryFileUrl,
+                            deliveryFileName: event.target.value === "service" ? "" : product.deliveryFileName,
+                            deliveryFileSize: event.target.value === "service" ? undefined : product.deliveryFileSize,
+                            soldOut: event.target.value === "service" ? false : product.soldOut,
                           })
                         }
                       >
@@ -752,6 +1259,20 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                                 : "Missing"}
                             </strong>
                           </div>
+                          <div className={`control-media-state${product.deliveryFileUrl ? " is-ready" : ""}`}>
+                            <span>Delivery File</span>
+                            <strong>
+                              {product.deliveryFileUrl
+                                ? `${product.deliveryFileName || "Full beat"}${
+                                    product.deliveryFileSize ? ` • ${formatFileSize(product.deliveryFileSize)}` : ""
+                                  }`
+                                : "Missing"}
+                            </strong>
+                          </div>
+                          <div className={`control-media-state${product.soldOut ? " is-draft" : " is-ready"}`}>
+                            <span>Availability</span>
+                            <strong>{product.soldOut ? "Sold" : "Available"}</strong>
+                          </div>
                         </div>
                         <label>
                           Artwork Upload
@@ -762,26 +1283,53 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                           />
                         </label>
                         <label>
-                          Sample Upload
+                          Beat Preview Source Upload
                           <input
                             type="file"
-                            accept=".mp3,.m4a,.aac,.ogg,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/aac,audio/ogg"
+                            accept=".wav,.wave,.aif,.aiff,.flac,.mp3,.m4a,.aac,.ogg,audio/*"
                             onChange={(event) => void handleFileUpload(event, index, "audioPreview")}
                           />
                         </label>
+                        <label>
+                          Full Beat Delivery Upload
+                          <input
+                            type="file"
+                            accept=".zip,.wav,.wave,.aif,.aiff,.flac,.mp3,.m4a,.aac,.ogg,audio/*,application/zip"
+                            onChange={(event) => void handleFileUpload(event, index, "deliveryFile")}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className={product.soldOut ? "button button-secondary full-width" : "button button-primary full-width"}
+                          onClick={() => {
+                            void updateProductAndSave(index, { soldOut: !product.soldOut });
+                            setStatusMessage(product.soldOut ? "Beat marked available." : "Beat marked sold.");
+                          }}
+                        >
+                          {product.soldOut ? "Mark Available" : "Mark Sold"}
+                        </button>
                         <p className="control-media-guidance">
-                          Only MP3, M4A, AAC, or OGG sample snippets are accepted here. WAV files and
-                          anything over {MAX_PROTECTED_SAMPLE_SECONDS} seconds are rejected to help protect the beat.
+                          Upload a beat source for preview generation, then upload the full delivery
+                          file separately. The public site only plays the protected {MAX_PROTECTED_SAMPLE_SECONDS}-second preview.
                         </p>
                         <p className="control-security-note">
-                          Upload preview snippets only. The public site keeps playback locked to the first {MAX_PROTECTED_SAMPLE_SECONDS} seconds.
+                          The public site receives the generated preview clip only. The full beat delivery
+                          file is emailed to the customer after Stripe confirms payment.
                         </p>
                         <div className="control-meta-inline">
                           <span>Current sample length</span>
                           <strong>{formatDuration(product.previewDuration)}</strong>
                         </div>
                         {product.artwork ? (
-                          <img src={product.artwork} alt={`${product.name} artwork preview`} className="control-preview-image" />
+                          <Image
+                            src={product.artwork}
+                            alt={`${product.name} artwork preview`}
+                            className="control-preview-image"
+                            width={960}
+                            height={960}
+                            sizes="(max-width: 760px) calc(100vw - 56px), (max-width: 1080px) 45vw, 520px"
+                            unoptimized
+                          />
                         ) : (
                           <div className="control-empty-state">No artwork uploaded yet.</div>
                         )}

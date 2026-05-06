@@ -1,30 +1,24 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Elements } from "@stripe/react-stripe-js";
 import ProductCheckoutForm from "@/components/product-checkout-form";
 import { useControlCenterContent } from "@/hooks/use-control-center-content";
-import { getReadyBeatProducts, getReadyServiceProducts } from "@/lib/store-product-utils";
+import { getReadyBeatProducts } from "@/lib/store-product-utils";
 import SampleAudioPlayer from "@/components/sample-audio-player";
 import { stripePromise } from "@/lib/stripe-client";
 
 export default function Storefront() {
   const [activeProductId, setActiveProductId] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState("");
-  const [configError, setConfigError] = useState("");
   const { products, settings } = useControlCenterContent();
-
-  useEffect(() => {
-    if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
-      setConfigError(
-        "Add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY and STRIPE_SECRET_KEY in .env.local to enable live checkout."
-      );
-    }
-  }, []);
+  const configError = !process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+    ? "Add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY and STRIPE_SECRET_KEY to your environment variables to enable live checkout."
+    : "";
 
   const beats = useMemo(() => getReadyBeatProducts(products), [products]);
-  const services = useMemo(() => getReadyServiceProducts(products), [products]);
 
   return (
     <Elements stripe={stripePromise}>
@@ -35,16 +29,23 @@ export default function Storefront() {
             <h1 className="hero-title">{settings.storeTitle}</h1>
             <p className="hero-text">{settings.storeDescription}</p>
             <div className="hero-actions">
-              <Link href="/mixing-mastering" className="button button-secondary">
-                View Mix & Master Tiers
-              </Link>
+              <a href="#beat-store" className="button button-primary">
+                Browse Beats
+              </a>
             </div>
           </div>
           <div className="store-hero-visual" data-reveal="right" data-parallax="0.12">
             <div className="store-hero-logo-shell" data-parallax="0.08">
               <span className="hero-wave hero-wave-top" aria-hidden="true"></span>
               <span className="hero-wave hero-wave-bottom" aria-hidden="true"></span>
-              <img src="/branding/logo.png" alt="KDUB Beats logo" className="store-hero-logo" />
+              <Image
+                src="/branding/logo.png"
+                alt="KDUB Beats logo"
+                className="store-hero-logo"
+                width={220}
+                height={220}
+                priority
+              />
             </div>
             <div className="logo-chip-row store-chip-row" aria-hidden="true">
               <span>Beat Licenses</span>
@@ -65,7 +66,7 @@ export default function Storefront() {
           </p>
         ) : null}
 
-        <section className="section-block">
+        <section className="section-block" id="beat-store">
           <div className="section-copy" data-reveal="fade">
             <p className="eyebrow">Beat Store</p>
             <h2>Preview beats with clean branding and secure checkout.</h2>
@@ -82,8 +83,17 @@ export default function Storefront() {
                 return (
                   <article className="panel store-card" key={product.id} data-reveal="zoom" data-parallax="0.018">
                     {product.badge ? <span className="product-badge">{product.badge}</span> : null}
+                    {product.soldOut ? <span className="product-badge product-badge-sold">Sold</span> : null}
                     {product.artwork ? (
-                      <img src={product.artwork} alt={`${product.name} artwork`} className="product-artwork" />
+                      <Image
+                        src={product.artwork}
+                        alt={`${product.name} artwork`}
+                        className="product-artwork"
+                        width={960}
+                        height={960}
+                        sizes="(max-width: 760px) calc(100vw - 56px), (max-width: 1080px) 45vw, 360px"
+                        unoptimized
+                      />
                     ) : null}
                     <div className="store-card-body">
                       <div className="product-topline">
@@ -105,7 +115,11 @@ export default function Storefront() {
                           <li key={deliverable}>{deliverable}</li>
                         ))}
                       </ul>
-                      {isActive ? (
+                      {product.soldOut ? (
+                        <button className="button button-secondary full-width" disabled>
+                          Sold
+                        </button>
+                      ) : isActive ? (
                         <ProductCheckoutForm
                           product={product}
                           onCancel={() => setActiveProductId(null)}
@@ -129,7 +143,7 @@ export default function Storefront() {
           ) : (
             <article className="panel store-empty-state" data-reveal="fade">
               <p className="eyebrow">No Beats Live Yet</p>
-              <h3>Beat previews only go live after they are uploaded in the private admin page.</h3>
+              <h3>Beat previews only go live after they are uploaded.</h3>
               <p>
                 This storefront will stay clean until new beats, artwork, and short protected
                 preview samples are added from the admin upload flow.
@@ -139,61 +153,17 @@ export default function Storefront() {
         </section>
 
         <section className="section-block">
-          <div className="section-copy" data-reveal="fade">
-            <p className="eyebrow">Studio Services</p>
-            <h2>Mixing and mastering now has its own sleek tiered checkout flow.</h2>
-            <p>
-              Artists can compare packages, choose the right tier, and pay from a dedicated service
-              checkout page built around your studio offers.
-            </p>
-          </div>
-          {services.length ? (
-            <div className="service-tier-preview-grid">
-              {services.map((product) => {
-                return (
-                  <article className="panel store-card service-store-card" key={product.id} data-reveal="zoom" data-parallax="0.018">
-                    {product.badge ? <span className="product-badge">{product.badge}</span> : null}
-                    <div className="store-card-body">
-                      <div className="product-topline">
-                        <span>Service Tier</span>
-                        <strong>${product.price}</strong>
-                      </div>
-                      <h3>{product.name}</h3>
-                      <p>{product.description}</p>
-                      <ul className="deliverable-list">
-                        {product.deliverables.map((deliverable) => (
-                          <li key={deliverable}>{deliverable}</li>
-                        ))}
-                      </ul>
-                      <Link href={`/mixing-mastering?tier=${product.slug}`} className="button button-primary full-width">
-                        Choose This Tier
-                      </Link>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          ) : (
-            <article className="panel store-empty-state" data-reveal="fade">
-              <p className="eyebrow">No Service Tiers Live Yet</p>
-              <h3>Upload your mixing and mastering packages in the private admin to activate this section.</h3>
-              <p>
-                As soon as your tier names, pricing, and deliverables are added there, this service
-                preview area and the dedicated checkout page will update automatically.
-              </p>
-            </article>
-          )}
           <div className="panel service-cta-banner" data-reveal="fade" data-parallax="0.04">
             <div>
-              <p className="eyebrow">Dedicated Service Checkout</p>
-              <h3>Let artists compare tiers before they pay.</h3>
+              <p className="eyebrow">Need A Mix Too?</p>
+              <h3>Mixing and mastering has a separate checkout page.</h3>
               <p>
-                The service page is focused on mix and master packages only, with cleaner wording,
-                tier selection, and a checkout panel built for studio work.
+                Beat buyers stay in this store. Artists who need a mix or master can open the
+                dedicated service flow when they are ready.
               </p>
             </div>
-            <Link href="/mixing-mastering" className="button button-primary">
-              Open Service Checkout
+            <Link href="/mixing-mastering" className="button button-secondary">
+              Open Mixing & Mastering
             </Link>
           </div>
         </section>

@@ -11,6 +11,10 @@ export interface StoreProduct {
   artwork?: string;
   audioPreview?: string;
   previewDuration?: number;
+  deliveryFileUrl?: string;
+  deliveryFileName?: string;
+  deliveryFileSize?: number;
+  soldOut?: boolean;
   deliverables: string[];
   badge?: string;
   stripeProductId?: string;
@@ -25,4 +29,17 @@ export interface StoreSettings {
   storeDescription: string;
   contactEmail: string;
   instagramUrl: string;
+  siteElements?: StoreSiteElement[];
+}
+
+export type StoreSiteElementPlacement = "homepage-feature" | "homepage-workflow";
+
+export interface StoreSiteElement {
+  id: string;
+  placement: StoreSiteElementPlacement;
+  label: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+  visible: boolean;
 }

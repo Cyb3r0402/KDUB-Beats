@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Elements } from "@stripe/react-stripe-js";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ProductCheckoutForm from "@/components/product-checkout-form";
 import SessionUploadForm from "@/components/session-upload-form";
@@ -20,46 +20,24 @@ export default function ServiceTierCheckout() {
   const searchParams = useSearchParams();
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState("");
-  const [configError, setConfigError] = useState("");
   const [checkoutClient, setCheckoutClient] = useState<CheckoutClientState>({
     fullName: "",
     email: "",
   });
-  const { products, settings } = useControlCenterContent();
-
-  useEffect(() => {
-    if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
-      setConfigError(
-        "Add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY and STRIPE_SECRET_KEY in .env.local to enable live checkout."
-      );
-    }
-  }, []);
+  const { products } = useControlCenterContent();
 
   const services = useMemo(
     () => getReadyServiceProducts(products),
     [products]
   );
   const selectedSlug = searchParams.get("tier");
-
-  useEffect(() => {
-    if (!services.length) {
-      setSelectedServiceId(null);
-      return;
-    }
-
-    const requestedService = services.find((service) => service.slug === selectedSlug);
-
-    setSelectedServiceId((current) => {
-      if (current && services.some((service) => service.id === current)) {
-        return current;
-      }
-
-      return requestedService?.id || services[0].id;
-    });
-  }, [services, selectedSlug]);
-
-  const selectedService =
-    services.find((service) => service.id === selectedServiceId) || services[0] || null;
+  const configError = !process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+    ? "Add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY and STRIPE_SECRET_KEY to your environment variables to enable live checkout."
+    : "";
+  const requestedService = services.find((service) => service.slug === selectedSlug) || null;
+  const manuallySelectedService =
+    services.find((service) => service.id === selectedServiceId) || null;
+  const selectedService = manuallySelectedService || requestedService || services[0] || null;
 
   return (
     <Elements stripe={stripePromise}>
@@ -76,8 +54,8 @@ export default function ServiceTierCheckout() {
               <Link href="/beatsforsale" className="button button-secondary">
                 Back To Beat Store
               </Link>
-              <a href={`mailto:${settings.contactEmail}`} className="button button-primary">
-                Ask About Custom Work
+              <a href="#service-tiers" className="button button-primary">
+                Choose A Tier First
               </a>
             </div>
           </div>
@@ -120,7 +98,7 @@ export default function ServiceTierCheckout() {
           </article>
         ) : (
           <>
-            <section className="section-block services-layout">
+            <section className="section-block services-layout" id="service-tiers">
               <div className="service-tier-grid">
                 {services.map((service) => {
                   const isSelected = selectedService?.id === service.id;

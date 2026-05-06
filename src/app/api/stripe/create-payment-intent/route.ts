@@ -4,7 +4,7 @@ import { stripe } from "@/lib/stripe";
 export async function POST(request: NextRequest) {
   if (!stripe) {
     return NextResponse.json(
-      { error: "Missing STRIPE_SECRET_KEY. Add it to .env.local before using checkout." },
+      { error: "Missing STRIPE_SECRET_KEY. Add it to your environment variables before using checkout." },
       { status: 500 }
     );
   }
@@ -19,6 +19,9 @@ export async function POST(request: NextRequest) {
       email,
       stripeProductId,
       stripePriceId,
+      deliveryFileUrl,
+      deliveryFileName,
+      soldOut,
     } = await request.json();
 
     let amount = Math.round(Number(price) * 100);
@@ -37,6 +40,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid product price." }, { status: 400 });
     }
 
+    if (soldOut === true) {
+      return NextResponse.json({ error: "This beat is sold and no longer available." }, { status: 400 });
+    }
+
     const paymentIntent = await stripe.paymentIntents.create({
       amount,
       currency: "usd",
@@ -53,6 +60,8 @@ export async function POST(request: NextRequest) {
         priceUsd: String(price),
         stripeProductId: String(stripeProductId || ""),
         stripePriceId: String(stripePriceId || ""),
+        deliveryFileUrl: String(deliveryFileUrl || "").slice(0, 500),
+        deliveryFileName: String(deliveryFileName || "").slice(0, 500),
         orderNotificationSent: "false",
       },
     });

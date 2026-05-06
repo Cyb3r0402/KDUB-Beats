@@ -1,4 +1,4 @@
-import { StoreProduct, StoreSettings } from "@/types/store";
+import { StoreProduct, StoreSettings, StoreSiteElement } from "@/types/store";
 
 export const defaultStoreProducts: StoreProduct[] = [
   {
@@ -50,9 +50,69 @@ export const defaultStoreSettings: StoreSettings = {
   heroTitle: "Beats, mixes, and masters built for records that need to hit clean and hard.",
   heroDescription:
     "KDUB Beats blends FL Studio production with Logic Pro mixing and mastering to help artists move from raw idea to release-ready record. The site is built to sell beats, compare service tiers, and checkout cleanly through Stripe.",
-  storeTitle: "Preview beats and lock in your session from one polished store.",
+  storeTitle: "Preview beats and buy the right sound from one polished store.",
   storeDescription:
-    "Hear protected beat previews, then move into sleek tier-based mixing and mastering checkout when it is time to finish the record.",
-  contactEmail: "bookings@kdubbeats.com",
+    "Hear protected beat previews, choose the track that fits, and checkout cleanly without exposing the full beat before purchase.",
+  contactEmail: "kalebmay18@gmail.com",
   instagramUrl: "https://instagram.com/",
+  siteElements: [
+    {
+      id: "element-beat-licensing",
+      placement: "homepage-feature",
+      label: "Beat Licensing Card",
+      eyebrow: "Beat Store",
+      title: "Beat Licensing",
+      description: "Sell beats with protected preview playback, branded cover art, and direct payment flow.",
+      visible: true,
+    },
+    {
+      id: "element-tier-checkout",
+      placement: "homepage-feature",
+      label: "Mixing & Mastering Card",
+      eyebrow: "Tier Checkout",
+      title: "Mixing & Mastering",
+      description: "Guide artists into sleek tier selection with a dedicated checkout page for studio work.",
+      visible: true,
+    },
+    {
+      id: "element-artist-brand",
+      placement: "homepage-feature",
+      label: "Professional Presence Card",
+      eyebrow: "Artist Brand",
+      title: "Professional Presence",
+      description: "Build trust with sharp visuals, premium wording, and a smoother buying experience.",
+      visible: true,
+    },
+    {
+      id: "element-choose-offer",
+      placement: "homepage-workflow",
+      label: "Workflow Step 1",
+      eyebrow: "01",
+      title: "Choose The Right Offer",
+      description: "Artists preview beats or compare mixing and mastering tiers based on where the song is headed.",
+      visible: true,
+    },
+    {
+      id: "element-checkout-cleanly",
+      placement: "homepage-workflow",
+      label: "Workflow Step 2",
+      eyebrow: "02",
+      title: "Checkout Cleanly",
+      description: "Stripe handles the payment flow so the site feels polished and trustworthy from the jump.",
+      visible: true,
+    },
+    {
+      id: "element-finish-record",
+      placement: "homepage-workflow",
+      label: "Workflow Step 3",
+      eyebrow: "03",
+      title: "Finish The Record",
+      description: "Follow up with files, references, and next steps so the song moves fast from payment to delivery.",
+      visible: true,
+    },
+  ],
 };
+
+export function getDefaultSiteElements(): StoreSiteElement[] {
+  return (defaultStoreSettings.siteElements || []).map((element) => ({ ...element }));
+}

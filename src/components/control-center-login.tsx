@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -48,7 +49,14 @@ export default function ControlCenterLogin() {
     <main className="page-shell control-center-page">
       <section className="auth-shell panel" data-reveal="fade">
         <div className="auth-brand">
-          <img src="/branding/logo.png" alt="KDUB Beats logo" className="brand-mark" />
+          <Image
+            src="/branding/logo.png"
+            alt="KDUB Beats logo"
+            className="brand-mark"
+            width={72}
+            height={72}
+            priority
+          />
           <div>
             <p className="eyebrow">Private Access</p>
             <h1 className="hero-title">Studio Session</h1>
