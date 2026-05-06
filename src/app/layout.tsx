@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
+import Script from "next/script";
 import ScrollEffects from "@/components/scroll-effects";
 import "./globals.css";
 
@@ -21,6 +22,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <Script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9889333502930604"
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
+      </head>
       <body>
         <ScrollEffects />
         {children}
