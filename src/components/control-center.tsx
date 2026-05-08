@@ -217,17 +217,26 @@ async function uploadStoreMedia(
   fileName: string,
   contentType: string
 ) {
-  const blob = await upload(getStoreMediaPathname(product, fileName, kind), body, {
-    access: "public",
-    contentType,
-    handleUploadUrl: "/api/uploads/store-media",
-    clientPayload: JSON.stringify({
-      originalName: fileName,
-      contentType,
-    }),
+  const formData = new FormData();
+  formData.append("file", body, fileName);
+  formData.append("pathname", getStoreMediaPathname(product, fileName, kind));
+  formData.append("originalName", fileName);
+  formData.append("contentType", contentType);
+
+  const response = await fetch("/api/uploads/store-media", {
+    method: "POST",
+    body: formData,
   });
 
-  return blob.url;
+  const result = (await response.json().catch(() => null)) as
+    | { url?: string; error?: string }
+    | null;
+
+  if (!response.ok || !result?.url) {
+    throw new Error(result?.error || "Store media upload failed.");
+  }
+
+  return result.url;
 }
 
 function createNewSiteElement(placement: StoreSiteElementPlacement): StoreSiteElement {
