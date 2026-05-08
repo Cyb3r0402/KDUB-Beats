@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { defaultStoreProducts, defaultStoreSettings } from "@/lib/store-data";
 import {
-  getStoredContent,
+  getPublishedContent,
   subscribeToControlCenterUpdates,
 } from "@/lib/control-center-storage";
 import type { StoreProduct, StoreSettings } from "@/types/store";
@@ -17,7 +17,7 @@ export function useControlCenterContent() {
     let active = true;
 
     async function loadContent() {
-      const storedContent = await getStoredContent();
+      const storedContent = await getPublishedContent();
 
       if (!active) {
         return;

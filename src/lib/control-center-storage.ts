@@ -16,6 +16,13 @@ interface PublishedStoreContentResponse extends Partial<StoreContent> {
   source?: "blob" | "defaults";
 }
 
+export type StoredContentSource = "published" | "local" | "defaults";
+
+export interface StoredContentLoadResult {
+  content: StoreContent;
+  source: StoredContentSource;
+}
+
 function hasIndexedDb() {
   return typeof window !== "undefined" && "indexedDB" in window;
 }
@@ -143,7 +150,12 @@ async function publishStoreContent(content: StoreContent) {
   return normalizeStoreContent(result || content);
 }
 
-export async function getStoredContent(): Promise<StoreContent> {
+export async function getPublishedContent(): Promise<StoreContent> {
+  const publishedContent = await fetchPublishedStoreContent();
+  return publishedContent?.content || getDefaultStoreContent();
+}
+
+export async function getStoredContentWithSource(): Promise<StoredContentLoadResult> {
   const [publishedContent, localContent] = await Promise.all([
     fetchPublishedStoreContent(),
     getLocalStoreContent(),
@@ -151,14 +163,28 @@ export async function getStoredContent(): Promise<StoreContent> {
 
   if (publishedContent?.source === "blob") {
     await saveLocalStoreContent(publishedContent.content).catch(() => undefined);
-    return publishedContent.content;
+    return {
+      content: publishedContent.content,
+      source: "published",
+    };
   }
 
   if (localContent) {
-    return localContent;
+    return {
+      content: localContent,
+      source: "local",
+    };
   }
 
-  return publishedContent?.content || getDefaultStoreContent();
+  return {
+    content: publishedContent?.content || getDefaultStoreContent(),
+    source: "defaults",
+  };
+}
+
+export async function getStoredContent(): Promise<StoreContent> {
+  const result = await getStoredContentWithSource();
+  return result.content;
 }
 
 export async function saveStoredContent(

@@ -2,16 +2,16 @@
 
 import { upload } from "@vercel/blob/client";
 import Image from "next/image";
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import SampleAudioPlayer from "@/components/sample-audio-player";
 import { formatFileSize } from "@/lib/session-upload";
 import type { StripeMode } from "@/lib/stripe";
 import {
-  getStoredContent,
+  getStoredContentWithSource,
   resetStoredContent,
   saveStoredContent,
-  saveStoredProducts,
+  type StoredContentSource,
 } from "@/lib/control-center-storage";
 import { defaultStoreProducts, defaultStoreSettings } from "@/lib/store-data";
 import {
@@ -526,12 +526,68 @@ function getStripeModeLabel(mode: StripeMode) {
   return "Not Configured";
 }
 
+function getContentSourceLabel(source: StoredContentSource) {
+  if (source === "published") {
+    return "Published";
+  }
+
+  if (source === "local") {
+    return "Browser Draft";
+  }
+
+  return "Defaults";
+}
+
+function getContentSourceDescription(source: StoredContentSource) {
+  if (source === "published") {
+    return "This page is reading the same published catalog that visitors should see.";
+  }
+
+  if (source === "local") {
+    return "You are seeing browser-only edits. Save all changes to publish them.";
+  }
+
+  return "No published catalog was found yet. Save all changes to create one.";
+}
+
+function getUploadFieldLabel(field: "artwork" | "audioPreview" | "deliveryFile") {
+  if (field === "artwork") {
+    return "artwork";
+  }
+
+  if (field === "audioPreview") {
+    return "protected sample";
+  }
+
+  return "full beat delivery file";
+}
+
+function getUploadErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "Upload failed.";
+
+  if (/client token|authorization|unauthorized|forbidden|401|403/i.test(message)) {
+    return "Upload authorization failed. Make sure BLOB_READ_WRITE_TOKEN is set in Vercel Production, then redeploy and sign in again.";
+  }
+
+  if (/failed to fetch|network|fetch failed/i.test(message)) {
+    return "Upload could not reach Vercel Blob. Check the connection, then try the upload again.";
+  }
+
+  return message;
+}
+
 export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
   const router = useRouter();
+  const productsRef = useRef<StoreProduct[]>(defaultStoreProducts);
+  const settingsRef = useRef<StoreSettings>(defaultStoreSettings);
+  const activeUploadProductIdRef = useRef<string | null>(null);
   const [products, setProducts] = useState<StoreProduct[]>(defaultStoreProducts);
   const [settings, setSettings] = useState<StoreSettings>(defaultStoreSettings);
+  const [contentSource, setContentSource] = useState<StoredContentSource>("defaults");
   const [saving, setSaving] = useState(false);
   const [stripeSyncing, setStripeSyncing] = useState(false);
+  const [activeUploadProductId, setActiveUploadProductId] = useState<string | null>(null);
+  const [activeUploadLabel, setActiveUploadLabel] = useState("");
   const [statusMessage, setStatusMessage] = useState(
     "Beats only go live from uploads made here. Upload the full beat and the control center saves only a protected 20-second preview."
   );
@@ -551,14 +607,30 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       typeof product.previewDuration === "number" &&
       product.previewDuration <= MAX_PROTECTED_SAMPLE_SECONDS
   ).length;
+  const hasActiveUpload = Boolean(activeUploadProductId);
+
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   useEffect(() => {
     async function loadContent() {
-      const storedContent = await getStoredContent();
+      const storedContent = await getStoredContentWithSource();
 
-      setProducts(storedContent.products);
-      setSettings(storedContent.settings);
-      setStatusMessage(getCatalogStatusMessage(storedContent.products));
+      productsRef.current = storedContent.content.products;
+      settingsRef.current = storedContent.content.settings;
+      setProducts(storedContent.content.products);
+      setSettings(storedContent.content.settings);
+      setContentSource(storedContent.source);
+      setStatusMessage(
+        storedContent.source === "local"
+          ? `${getCatalogStatusMessage(storedContent.content.products)} These changes are only saved in this browser until Save All Changes publishes them.`
+          : getCatalogStatusMessage(storedContent.content.products)
+      );
     }
 
     loadContent().catch(() => {
@@ -609,8 +681,8 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
   }, []);
 
   function updateProduct(index: number, patch: Partial<StoreProduct>) {
-    setProducts((current) =>
-      current.map((product, productIndex) => {
+    setProducts((current) => {
+      const nextProducts = current.map((product, productIndex) => {
         if (productIndex !== index) {
           return product;
         }
@@ -622,12 +694,15 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
           ...patch,
           slug: createSlug(nextName || product.slug || product.id),
         };
-      })
-    );
+      });
+
+      productsRef.current = nextProducts;
+      return nextProducts;
+    });
   }
 
   async function updateProductAndSave(index: number, patch: Partial<StoreProduct>) {
-    const nextProducts = products.map((product, productIndex) => {
+    const nextProducts = productsRef.current.map((product, productIndex) => {
       if (productIndex !== index) {
         return product;
       }
@@ -644,8 +719,14 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     const mediaReadyContent = await publishEmbeddedProductMedia(nextProducts);
     const normalizedProducts = mediaReadyContent.products.map(normalizeProductDraft);
 
+    productsRef.current = normalizedProducts;
     setProducts(normalizedProducts);
-    await saveStoredProducts(normalizedProducts);
+    const savedContent = await saveStoredContent(normalizedProducts, settingsRef.current);
+    productsRef.current = savedContent.products;
+    settingsRef.current = savedContent.settings;
+    setProducts(savedContent.products);
+    setSettings(savedContent.settings);
+    setContentSource("published");
   }
 
   function updateDeliverables(index: number, value: string) {
@@ -663,29 +744,60 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     setSettings((current) => {
       const siteElements = current.siteElements || [];
 
-      return {
+      const nextSettings = {
         ...current,
         siteElements: siteElements.map((element, elementIndex) =>
           elementIndex === index ? { ...element, ...patch } : element
         ),
       };
+
+      settingsRef.current = nextSettings;
+      return nextSettings;
     });
   }
 
   function removeSiteElement(index: number) {
-    setSettings((current) => ({
-      ...current,
-      siteElements: (current.siteElements || []).filter((_, elementIndex) => elementIndex !== index),
-    }));
+    setSettings((current) => {
+      const nextSettings = {
+        ...current,
+        siteElements: (current.siteElements || []).filter((_, elementIndex) => elementIndex !== index),
+      };
+
+      settingsRef.current = nextSettings;
+      return nextSettings;
+    });
     setStatusMessage("Site element removed. Save changes to update the public page.");
   }
 
   function addSiteElement(placement: StoreSiteElementPlacement) {
-    setSettings((current) => ({
-      ...current,
-      siteElements: [...(current.siteElements || []), createNewSiteElement(placement)],
-    }));
+    setSettings((current) => {
+      const nextSettings = {
+        ...current,
+        siteElements: [...(current.siteElements || []), createNewSiteElement(placement)],
+      };
+
+      settingsRef.current = nextSettings;
+      return nextSettings;
+    });
     setStatusMessage("New editable site element added. Fill it in, then save changes.");
+  }
+
+  function addProduct(category: ProductCategory) {
+    setProducts((current) => {
+      const nextProducts = [...current, createNewProduct(category)];
+      productsRef.current = nextProducts;
+      return nextProducts;
+    });
+    setStatusMessage(category === "beat" ? "New beat added. Upload artwork and a protected sample to publish it." : "New service added. Fill in the details, then save changes.");
+  }
+
+  function removeProduct(index: number) {
+    setProducts((current) => {
+      const nextProducts = current.filter((_, itemIndex) => itemIndex !== index);
+      productsRef.current = nextProducts;
+      return nextProducts;
+    });
+    setStatusMessage("Product removed. Save changes to update the public catalog.");
   }
 
   async function handleFileUpload(
@@ -698,6 +810,25 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     if (!file) {
       return;
     }
+
+    const product = productsRef.current[index];
+
+    if (!product) {
+      event.target.value = "";
+      setStatusMessage("That product could not be found. Refresh the control center, then try again.");
+      return;
+    }
+
+    if (activeUploadProductIdRef.current) {
+      event.target.value = "";
+      setStatusMessage("Finish the current upload before starting another one.");
+      return;
+    }
+
+    const uploadLabel = getUploadFieldLabel(field);
+    activeUploadProductIdRef.current = product.id;
+    setActiveUploadProductId(product.id);
+    setActiveUploadLabel(uploadLabel);
 
     try {
       if (field === "artwork") {
@@ -719,7 +850,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
         setStatusMessage("Creating a protected preview from the strongest part of the beat...");
         const preview = await createBeatPreviewBlob(file);
-        const currentProduct = products[index];
+        const currentProduct = productsRef.current[index] || product;
         const nextName =
           currentProduct.name && currentProduct.name !== "New Beat"
             ? currentProduct.name
@@ -770,7 +901,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
           return;
         }
 
-        const currentProduct = products[index];
+        const currentProduct = productsRef.current[index] || product;
         setStatusMessage("Uploading the full beat delivery file...");
         const contentType = file.type || "application/octet-stream";
         const blob = await upload(getBeatDeliveryPathname(currentProduct, file.name), file, {
@@ -793,7 +924,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
         return;
       }
 
-      const currentProduct = products[index];
+      const currentProduct = productsRef.current[index] || product;
       const contentType = getStoreMediaContentType(file.name, file.type);
 
       setStatusMessage("Uploading artwork to the public store media library...");
@@ -808,9 +939,11 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       await updateProductAndSave(index, { artwork: artworkUrl });
       setStatusMessage("Artwork loaded and saved. Add a protected sample if this beat is not live yet.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Upload failed.";
-      setStatusMessage(message);
+      setStatusMessage(getUploadErrorMessage(error));
     } finally {
+      activeUploadProductIdRef.current = null;
+      setActiveUploadProductId(null);
+      setActiveUploadLabel("");
       event.target.value = "";
     }
   }
@@ -819,19 +952,23 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     setSaving(true);
 
     try {
-      const mediaReadyContent = await publishEmbeddedProductMedia(products);
+      const mediaReadyContent = await publishEmbeddedProductMedia(productsRef.current);
       const normalizedProducts = mediaReadyContent.products.map(normalizeProductDraft);
       const readyCount = normalizedProducts.filter(isProductReadyForStorefront).length;
       const draftCount = normalizedProducts.length - readyCount;
 
       if (mediaReadyContent.convertedCount) {
+        productsRef.current = normalizedProducts;
         setProducts(normalizedProducts);
         setStatusMessage(`Published ${mediaReadyContent.convertedCount} embedded media file(s) before saving the public catalog.`);
       }
 
-      const savedContent = await saveStoredContent(normalizedProducts, settings);
+      const savedContent = await saveStoredContent(normalizedProducts, settingsRef.current);
+      productsRef.current = savedContent.products;
+      settingsRef.current = savedContent.settings;
       setProducts(savedContent.products);
       setSettings(savedContent.settings);
+      setContentSource("published");
       setStatusMessage(
         draftCount
           ? `Saved. ${readyCount} item(s) are ready for the storefront and ${draftCount} draft item(s) stay hidden until they are complete.`
@@ -850,8 +987,11 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
     try {
       await resetStoredContent();
+      productsRef.current = defaultStoreProducts;
+      settingsRef.current = defaultStoreSettings;
       setProducts(defaultStoreProducts);
       setSettings(defaultStoreSettings);
+      setContentSource("published");
       setStatusMessage(getCatalogStatusMessage(defaultStoreProducts));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Reset failed.";
@@ -865,13 +1005,14 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     setStripeSyncing(true);
 
     try {
-      const mediaReadyContent = await publishEmbeddedProductMedia(products);
+      const mediaReadyContent = await publishEmbeddedProductMedia(productsRef.current);
       const normalizedProducts = mediaReadyContent.products.map(normalizeProductDraft);
       const stripeSyncableProducts = normalizedProducts.filter(
         (product) => product.name && product.price >= 0.5
       );
 
       if (mediaReadyContent.convertedCount) {
+        productsRef.current = normalizedProducts;
         setProducts(normalizedProducts);
         setStatusMessage(`Published ${mediaReadyContent.convertedCount} embedded media file(s) before syncing Stripe.`);
       }
@@ -881,7 +1022,12 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
         return;
       }
 
-      await saveStoredContent(normalizedProducts, settings);
+      const savedContent = await saveStoredContent(normalizedProducts, settingsRef.current);
+      productsRef.current = savedContent.products;
+      settingsRef.current = savedContent.settings;
+      setProducts(savedContent.products);
+      setSettings(savedContent.settings);
+      setContentSource("published");
 
       const response = await fetch("/api/control-center/stripe/sync", {
         method: "POST",
@@ -909,8 +1055,14 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
         (product) => syncedProductMap.get(product.id) || product
       );
 
+      productsRef.current = mergedProducts;
       setProducts(mergedProducts);
-      await saveStoredProducts(mergedProducts);
+      const syncedContent = await saveStoredContent(mergedProducts, settingsRef.current);
+      productsRef.current = syncedContent.products;
+      settingsRef.current = syncedContent.settings;
+      setProducts(syncedContent.products);
+      setSettings(syncedContent.settings);
+      setContentSource("published");
       const skippedCount = Number(result.skippedCount || 0);
       const failedCount = Number(result.failedCount || 0);
       const failedNames = Array.isArray(result.failedProducts)
@@ -999,6 +1151,11 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
             <strong className="control-overview-value">{draftProductCount}</strong>
             <p>Items saved here but still hidden until their uploads and details are complete.</p>
           </article>
+          <article className="panel control-overview-card">
+            <span className="control-overview-label">Catalog Source</span>
+            <strong className="control-overview-value">{getContentSourceLabel(contentSource)}</strong>
+            <p>{getContentSourceDescription(contentSource)}</p>
+          </article>
         </div>
       </section>
 
@@ -1045,7 +1202,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
               className="button button-primary"
               type="button"
               onClick={handleStripeSync}
-              disabled={!stripeStatus.configured || stripeSyncing || saving || !products.length}
+              disabled={!stripeStatus.configured || stripeSyncing || saving || hasActiveUpload || !products.length}
             >
               {stripeSyncing ? "Syncing Stripe..." : "Sync Catalog To Stripe"}
             </button>
@@ -1279,21 +1436,23 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
             <button
               className="button button-primary"
               type="button"
-              onClick={() => setProducts((current) => [...current, createNewProduct("beat")])}
+              onClick={() => addProduct("beat")}
+              disabled={saving || hasActiveUpload}
             >
               Add Beat
             </button>
             <button
               className="button button-secondary"
               type="button"
-              onClick={() => setProducts((current) => [...current, createNewProduct("service")])}
+              onClick={() => addProduct("service")}
+              disabled={saving || hasActiveUpload}
             >
               Add Service
             </button>
-            <button className="button button-secondary" type="button" onClick={handleReset} disabled={saving}>
+            <button className="button button-secondary" type="button" onClick={handleReset} disabled={saving || hasActiveUpload}>
               Reset To Defaults
             </button>
-            <button className="button button-primary" type="button" onClick={handleSave} disabled={saving}>
+            <button className="button button-primary" type="button" onClick={handleSave} disabled={saving || hasActiveUpload}>
               {saving ? "Saving..." : "Save All Changes"}
             </button>
           </div>
@@ -1308,6 +1467,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
             const normalizedProduct = normalizeProductDraft(product);
             const productIssues = getProductReadinessIssues(normalizedProduct);
             const isReady = productIssues.length === 0;
+            const isUploadingProduct = activeUploadProductId === product.id;
 
             return (
             <article className="panel control-panel" key={product.id} data-reveal="zoom">
@@ -1322,7 +1482,8 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                 <button
                   type="button"
                   className="button button-secondary control-delete"
-                  onClick={() => setProducts((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                  onClick={() => removeProduct(index)}
+                  disabled={saving || isUploadingProduct}
                 >
                   Remove
                 </button>
@@ -1492,6 +1653,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                           <input
                             type="file"
                             accept="image/*"
+                            disabled={isUploadingProduct}
                             onChange={(event) => void handleFileUpload(event, index, "artwork")}
                           />
                         </label>
@@ -1500,6 +1662,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                           <input
                             type="file"
                             accept=".wav,.wave,.aif,.aiff,.flac,.mp3,.m4a,.aac,.ogg,audio/*"
+                            disabled={isUploadingProduct}
                             onChange={(event) => void handleFileUpload(event, index, "audioPreview")}
                           />
                         </label>
@@ -1508,12 +1671,14 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                           <input
                             type="file"
                             accept=".zip,.wav,.wave,.aif,.aiff,.flac,.mp3,.m4a,.aac,.ogg,audio/*,application/zip"
+                            disabled={isUploadingProduct}
                             onChange={(event) => void handleFileUpload(event, index, "deliveryFile")}
                           />
                         </label>
                         <button
                           type="button"
                           className={product.soldOut ? "button button-secondary full-width" : "button button-primary full-width"}
+                          disabled={isUploadingProduct}
                           onClick={() => {
                             void updateProductAndSave(index, { soldOut: !product.soldOut });
                             setStatusMessage(product.soldOut ? "Beat marked available." : "Beat marked sold.");
@@ -1521,6 +1686,11 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                         >
                           {product.soldOut ? "Mark Available" : "Mark Sold"}
                         </button>
+                        {isUploadingProduct ? (
+                          <p className="control-upload-progress" aria-live="polite">
+                            Uploading {activeUploadLabel}. Keep this tab open until the status changes.
+                          </p>
+                        ) : null}
                         <p className="control-media-guidance">
                           Upload a beat source for preview generation, then upload the full delivery
                           file separately. The public site only plays the protected {MAX_PROTECTED_SAMPLE_SECONDS}-second preview.

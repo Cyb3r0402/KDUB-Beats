@@ -2092,6 +2092,16 @@ img {
   line-height: 1.65;
 }
 
+.control-upload-progress {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(124, 214, 255, 0.1);
+  border: 1px solid rgba(124, 214, 255, 0.24);
+  color: #edf8ff;
+  line-height: 1.6;
+}
+
 .control-ready-note {
   padding: 12px 14px;
   border-radius: 16px;
@@ -2152,6 +2162,11 @@ img {
   color: var(--text);
   padding: 12px 14px;
   font: inherit;
+}
+
+.control-media-stack input[type="file"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.64;
 }
 
 .control-media-stack input[type="file"]::file-selector-button {
