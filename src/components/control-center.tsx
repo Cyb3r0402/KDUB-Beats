@@ -627,6 +627,9 @@ interface ControlCenterProps {
   };
 }
 
+type BeatUploadField = "artwork" | "beatAudio";
+type PendingProductUploads = Partial<Record<BeatUploadField, File>>;
+
 function getStripeModeLabel(mode: StripeMode) {
   if (mode === "live") {
     return "Live Mode";
@@ -663,7 +666,7 @@ function getContentSourceDescription(source: StoredContentSource) {
   return "No published catalog was found yet. Save all changes to create one.";
 }
 
-function getUploadFieldLabel(field: "artwork" | "beatAudio") {
+function getUploadFieldLabel(field: BeatUploadField) {
   if (field === "artwork") {
     return "artwork";
   }
@@ -699,6 +702,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
   const [activeUploadLabel, setActiveUploadLabel] = useState("");
   const [activeUploadFileName, setActiveUploadFileName] = useState("");
   const [activeUploadProgress, setActiveUploadProgress] = useState<number | null>(null);
+  const [pendingUploads, setPendingUploads] = useState<Record<string, PendingProductUploads>>({});
   const [statusMessage, setStatusMessage] = useState(
     "Beats only go live from uploads made here. Upload the full beat and the control center saves only a protected 20-second preview."
   );
@@ -911,27 +915,41 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     setStatusMessage("Product removed. Save changes to update the public catalog.");
   }
 
-  async function handleFileUpload(
-    event: ChangeEvent<HTMLInputElement>,
-    index: number,
-    field: "artwork" | "beatAudio"
-  ) {
-    const file = event.target.files?.[0];
+  function setPendingProductUpload(productId: string, field: BeatUploadField, file: File | null) {
+    setPendingUploads((current) => {
+      const nextUploads = { ...current };
+      const productUploads = { ...(nextUploads[productId] || {}) };
 
+      if (file) {
+        productUploads[field] = file;
+      } else {
+        delete productUploads[field];
+      }
+
+      if (Object.keys(productUploads).length) {
+        nextUploads[productId] = productUploads;
+      } else {
+        delete nextUploads[productId];
+      }
+
+      return nextUploads;
+    });
+  }
+
+  async function uploadProductFile(index: number, field: BeatUploadField, file: File | undefined) {
     if (!file) {
+      setStatusMessage(`Choose a ${getUploadFieldLabel(field)} file first.`);
       return;
     }
 
     const product = productsRef.current[index];
 
     if (!product) {
-      event.target.value = "";
       setStatusMessage("That product could not be found. Refresh the control center, then try again.");
       return;
     }
 
     if (activeUploadProductIdRef.current) {
-      event.target.value = "";
       setStatusMessage("Finish the current upload before starting another one.");
       return;
     }
@@ -1063,9 +1081,26 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       setActiveUploadProgress(null);
 
       if (uploadSucceeded) {
-        event.target.value = "";
+        setPendingProductUpload(product.id, field, null);
       }
     }
+  }
+
+  function handleFileUpload(
+    event: ChangeEvent<HTMLInputElement>,
+    index: number,
+    field: BeatUploadField
+  ) {
+    const file = event.target.files?.[0];
+    const product = productsRef.current[index];
+
+    if (!file || !product) {
+      return;
+    }
+
+    setPendingProductUpload(product.id, field, file);
+    setStatusMessage(`${file.name} selected. Starting the ${getUploadFieldLabel(field)} upload...`);
+    void uploadProductFile(index, field, file);
   }
 
   async function handleSave() {
@@ -1588,6 +1623,9 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
             const productIssues = getProductReadinessIssues(normalizedProduct);
             const isReady = productIssues.length === 0;
             const isUploadingProduct = activeUploadProductId === product.id;
+            const pendingProductUploads = pendingUploads[product.id] || {};
+            const pendingArtworkFile = pendingProductUploads.artwork;
+            const pendingBeatFile = pendingProductUploads.beatAudio;
 
             return (
             <article className="panel control-panel" key={product.id} data-reveal="zoom">
@@ -1771,21 +1809,51 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                         <label>
                           Artwork Upload
                           <input
+                            key={`${product.id}-artwork-${product.artwork || "empty"}`}
                             type="file"
                             accept="image/*"
                             disabled={isUploadingProduct}
                             onChange={(event) => void handleFileUpload(event, index, "artwork")}
                           />
                         </label>
+                        {pendingArtworkFile ? (
+                          <div className="control-selected-upload">
+                            <span>Selected artwork</span>
+                            <strong>{pendingArtworkFile.name}</strong>
+                            <button
+                              type="button"
+                              className="button button-secondary"
+                              disabled={isUploadingProduct}
+                              onClick={() => void uploadProductFile(index, "artwork", pendingArtworkFile)}
+                            >
+                              Upload Selected Artwork
+                            </button>
+                          </div>
+                        ) : null}
                         <label>
                           Full Beat Upload
                           <input
+                            key={`${product.id}-beat-${product.audioPreview || product.deliveryFileUrl || "empty"}`}
                             type="file"
                             accept=".wav,.wave,.aif,.aiff,.flac,.mp3,.m4a,.aac,.ogg,audio/*"
                             disabled={isUploadingProduct}
                             onChange={(event) => void handleFileUpload(event, index, "beatAudio")}
                           />
                         </label>
+                        {pendingBeatFile ? (
+                          <div className="control-selected-upload">
+                            <span>Selected full beat</span>
+                            <strong>{pendingBeatFile.name}</strong>
+                            <button
+                              type="button"
+                              className="button button-secondary"
+                              disabled={isUploadingProduct}
+                              onClick={() => void uploadProductFile(index, "beatAudio", pendingBeatFile)}
+                            >
+                              Upload Selected Beat
+                            </button>
+                          </div>
+                        ) : null}
                         <button
                           type="button"
                           className={product.soldOut ? "button button-secondary full-width" : "button button-primary full-width"}

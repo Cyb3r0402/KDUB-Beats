@@ -2103,6 +2103,32 @@ img {
   line-height: 1.6;
 }
 
+.control-selected-upload {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(159, 230, 255, 0.14);
+}
+
+.control-selected-upload span {
+  color: var(--blue-soft);
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.control-selected-upload strong {
+  color: #edf6ff;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.control-selected-upload .button {
+  justify-self: start;
+}
+
 .control-ready-note {
   padding: 12px 14px;
   border-radius: 16px;
