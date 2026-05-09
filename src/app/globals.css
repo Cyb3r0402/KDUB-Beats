@@ -2125,6 +2125,12 @@ img {
   overflow-wrap: anywhere;
 }
 
+.control-selected-upload p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.55;
+}
+
 .control-selected-upload .button {
   justify-self: start;
 }
@@ -2174,6 +2180,11 @@ img {
 .control-media-state.is-ready {
   background: rgba(133, 255, 176, 0.08);
   border-color: rgba(133, 255, 176, 0.18);
+}
+
+.control-media-state.is-pending {
+  background: rgba(124, 214, 255, 0.08);
+  border-color: rgba(124, 214, 255, 0.22);
 }
 
 .control-media-state.is-draft {

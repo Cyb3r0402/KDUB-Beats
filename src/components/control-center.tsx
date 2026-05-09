@@ -629,6 +629,7 @@ interface ControlCenterProps {
 
 type BeatUploadField = "artwork" | "beatAudio";
 type PendingProductUploads = Partial<Record<BeatUploadField, File>>;
+type ProductUploadMessages = Partial<Record<BeatUploadField, string>>;
 
 function getStripeModeLabel(mode: StripeMode) {
   if (mode === "live") {
@@ -681,8 +682,8 @@ function getUploadErrorMessage(error: unknown) {
     return "Upload authorization failed. Make sure BLOB_READ_WRITE_TOKEN is set in Vercel Production, then redeploy and sign in again.";
   }
 
-  if (/failed to fetch|network|fetch failed/i.test(message)) {
-    return "Upload could not reach Vercel Blob. Check the connection, then try the upload again.";
+  if (/failed to fetch|network|fetch failed|cors/i.test(message)) {
+    return "Upload was blocked before Vercel Blob accepted the file. If this happens in production, re-check the Production BLOB_READ_WRITE_TOKEN is connected to this Vercel project, redeploy, then try again.";
   }
 
   return message;
@@ -703,6 +704,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
   const [activeUploadFileName, setActiveUploadFileName] = useState("");
   const [activeUploadProgress, setActiveUploadProgress] = useState<number | null>(null);
   const [pendingUploads, setPendingUploads] = useState<Record<string, PendingProductUploads>>({});
+  const [uploadMessages, setUploadMessages] = useState<Record<string, ProductUploadMessages>>({});
   const [statusMessage, setStatusMessage] = useState(
     "Beats only go live from uploads made here. Upload the full beat and the control center saves only a protected 20-second preview."
   );
@@ -936,6 +938,27 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     });
   }
 
+  function setProductUploadMessage(productId: string, field: BeatUploadField, message: string) {
+    setUploadMessages((current) => {
+      const nextMessages = { ...current };
+      const productMessages = { ...(nextMessages[productId] || {}) };
+
+      if (message) {
+        productMessages[field] = message;
+      } else {
+        delete productMessages[field];
+      }
+
+      if (Object.keys(productMessages).length) {
+        nextMessages[productId] = productMessages;
+      } else {
+        delete nextMessages[productId];
+      }
+
+      return nextMessages;
+    });
+  }
+
   async function uploadProductFile(index: number, field: BeatUploadField, file: File | undefined) {
     if (!file) {
       setStatusMessage(`Choose a ${getUploadFieldLabel(field)} file first.`);
@@ -951,6 +974,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
     if (activeUploadProductIdRef.current) {
       setStatusMessage("Finish the current upload before starting another one.");
+      setProductUploadMessage(product.id, field, "Finish the current upload before starting another one.");
       return;
     }
 
@@ -962,6 +986,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     setActiveUploadLabel(uploadLabel);
     setActiveUploadFileName(file.name);
     setActiveUploadProgress(null);
+    setProductUploadMessage(product.id, field, `Preparing ${file.name}...`);
 
     try {
       if (field === "artwork") {
@@ -969,6 +994,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
         if (artworkIssue) {
           setStatusMessage(artworkIssue);
+          setProductUploadMessage(product.id, field, artworkIssue);
           return;
         }
       }
@@ -978,6 +1004,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
         if (previewTypeIssue) {
           setStatusMessage(previewTypeIssue);
+          setProductUploadMessage(product.id, field, previewTypeIssue);
           return;
         }
 
@@ -985,10 +1012,12 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
         if (deliveryIssue) {
           setStatusMessage(deliveryIssue);
+          setProductUploadMessage(product.id, field, deliveryIssue);
           return;
         }
 
         setStatusMessage("Creating a protected 20-second preview from the full beat...");
+        setProductUploadMessage(product.id, field, "Creating a protected 20-second preview from the full beat...");
         const preview = await createBeatPreviewBlob(file);
         const currentProduct = productsRef.current[index] || product;
         const nextName =
@@ -1002,6 +1031,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
         const previewFileName = `${createSlug(nextName) || "beat"}-preview.wav`;
 
         setStatusMessage("Uploading the protected preview to the public store media library...");
+        setProductUploadMessage(product.id, field, "Uploading the protected preview to the public store media library...");
         const previewUrl = await uploadStoreMedia(
           mediaProduct,
           "previews",
@@ -1011,6 +1041,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
         );
 
         setStatusMessage("Uploading the full beat delivery file...");
+        setProductUploadMessage(product.id, field, "Uploading the full beat delivery file...");
         const contentType = getStoreMediaContentType(file.name, file.type);
         const blob = await upload(getBeatDeliveryPathname(mediaProduct, file.name), file, {
           access: "public",
@@ -1022,7 +1053,9 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
             contentType,
           }),
           onUploadProgress: ({ percentage }) => {
-            setActiveUploadProgress(Math.round(percentage));
+            const roundedPercentage = Math.round(percentage);
+            setActiveUploadProgress(roundedPercentage);
+            setProductUploadMessage(product.id, field, `Uploading the full beat delivery file (${roundedPercentage}%)...`);
           },
         });
 
@@ -1057,9 +1090,11 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       const currentProduct = productsRef.current[index] || product;
 
       setStatusMessage("Fitting artwork into the storefront rectangle...");
+      setProductUploadMessage(product.id, field, "Fitting artwork into the storefront rectangle...");
       const artworkUpload = await createFittedArtworkUpload(file);
 
       setStatusMessage("Uploading fitted artwork to the public store media library...");
+      setProductUploadMessage(product.id, field, "Uploading fitted artwork to the public store media library...");
       const artworkUrl = await uploadStoreMedia(
         currentProduct,
         "artwork",
@@ -1072,7 +1107,9 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       setStatusMessage("Artwork fitted into a 16:9 rectangle and saved. Upload the full beat once to create the protected sample and delivery file.");
       uploadSucceeded = true;
     } catch (error) {
-      setStatusMessage(getUploadErrorMessage(error));
+      const uploadMessage = getUploadErrorMessage(error);
+      setStatusMessage(uploadMessage);
+      setProductUploadMessage(product.id, field, uploadMessage);
     } finally {
       activeUploadProductIdRef.current = null;
       setActiveUploadProductId(null);
@@ -1082,6 +1119,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
       if (uploadSucceeded) {
         setPendingProductUpload(product.id, field, null);
+        setProductUploadMessage(product.id, field, "");
       }
     }
   }
@@ -1099,6 +1137,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     }
 
     setPendingProductUpload(product.id, field, file);
+    setProductUploadMessage(product.id, field, `${file.name} selected. Starting the ${getUploadFieldLabel(field)} upload...`);
     setStatusMessage(`${file.name} selected. Starting the ${getUploadFieldLabel(field)} upload...`);
     void uploadProductFile(index, field, file);
   }
@@ -1626,6 +1665,9 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
             const pendingProductUploads = pendingUploads[product.id] || {};
             const pendingArtworkFile = pendingProductUploads.artwork;
             const pendingBeatFile = pendingProductUploads.beatAudio;
+            const productUploadMessages = uploadMessages[product.id] || {};
+            const artworkUploadMessage = productUploadMessages.artwork;
+            const beatUploadMessage = productUploadMessages.beatAudio;
 
             return (
             <article className="panel control-panel" key={product.id} data-reveal="zoom">
@@ -1779,26 +1821,30 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                       <p className="eyebrow">Beat Media</p>
                       <div className="control-media-stack">
                         <div className="control-media-grid">
-                          <div className={`control-media-state${product.artwork ? " is-ready" : ""}`}>
+                          <div className={`control-media-state${product.artwork ? " is-ready" : pendingArtworkFile ? " is-pending" : ""}`}>
                             <span>Artwork</span>
-                            <strong>{product.artwork ? "Uploaded" : "Missing"}</strong>
+                            <strong>{product.artwork ? "Uploaded" : pendingArtworkFile ? "Selected" : "Missing"}</strong>
                           </div>
-                          <div className={`control-media-state${product.audioPreview ? " is-ready" : ""}`}>
+                          <div className={`control-media-state${product.audioPreview ? " is-ready" : pendingBeatFile ? " is-pending" : ""}`}>
                             <span>Protected Sample</span>
                             <strong>
                               {product.audioPreview
                                 ? `${formatDuration(product.previewDuration)} loaded`
-                                : "Missing"}
+                                : pendingBeatFile
+                                  ? "Selected"
+                                  : "Missing"}
                             </strong>
                           </div>
-                          <div className={`control-media-state${product.deliveryFileUrl ? " is-ready" : ""}`}>
+                          <div className={`control-media-state${product.deliveryFileUrl ? " is-ready" : pendingBeatFile ? " is-pending" : ""}`}>
                             <span>Delivery File</span>
                             <strong>
                               {product.deliveryFileUrl
                                 ? `${product.deliveryFileName || "Full beat"}${
                                     product.deliveryFileSize ? ` • ${formatFileSize(product.deliveryFileSize)}` : ""
                                   }`
-                                : "Missing"}
+                                : pendingBeatFile
+                                  ? "Selected"
+                                  : "Missing"}
                             </strong>
                           </div>
                           <div className={`control-media-state${product.soldOut ? " is-draft" : " is-ready"}`}>
@@ -1828,6 +1874,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                             >
                               Upload Selected Artwork
                             </button>
+                            {artworkUploadMessage ? <p>{artworkUploadMessage}</p> : null}
                           </div>
                         ) : null}
                         <label>
@@ -1852,6 +1899,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                             >
                               Upload Selected Beat
                             </button>
+                            {beatUploadMessage ? <p>{beatUploadMessage}</p> : null}
                           </div>
                         ) : null}
                         <button
@@ -1895,7 +1943,9 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                             unoptimized
                           />
                         ) : (
-                          <div className="control-empty-state">No artwork uploaded yet.</div>
+                          <div className="control-empty-state">
+                            {pendingArtworkFile ? "Artwork selected. Upload still needs to finish." : "No artwork uploaded yet."}
+                          </div>
                         )}
                         {product.audioPreview ? (
                           <SampleAudioPlayer
@@ -1905,7 +1955,9 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                             caption="Playback is locked to a 20-second sample for storefront security."
                           />
                         ) : (
-                          <div className="control-empty-state">No sample uploaded yet.</div>
+                          <div className="control-empty-state">
+                            {pendingBeatFile ? "Beat selected. Upload still needs to finish before the sample appears." : "No sample uploaded yet."}
+                          </div>
                         )}
                       </div>
                     </section>
