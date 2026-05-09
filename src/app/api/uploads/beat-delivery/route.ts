@@ -1,6 +1,7 @@
 import { put } from "@vercel/blob";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
+import { BLOB_READ_WRITE_TOKEN_ENV_NAMES, getBlobReadWriteToken, hasBlobReadWriteToken } from "@/lib/blob-token";
 import {
   CONTROL_CENTER_COOKIE_NAME,
   isAuthorizedControlCenterSession,
@@ -54,7 +55,7 @@ function getUploadFailureMessage(error: unknown) {
   }
 
   if (/token|unauthorized|forbidden|401|403/i.test(message)) {
-    return "Blob upload authorization failed. Check BLOB_READ_WRITE_TOKEN in Vercel Production, then redeploy.";
+    return `Blob upload authorization failed. Check ${BLOB_READ_WRITE_TOKEN_ENV_NAMES} in Vercel Production, then redeploy.`;
   }
 
   return message;
@@ -99,7 +100,7 @@ async function handleDirectBeatDeliveryUpload(request: Request) {
       access: "public",
       addRandomSuffix: true,
       contentType,
-      token: process.env.BLOB_READ_WRITE_TOKEN,
+      token: getBlobReadWriteToken(),
     });
 
     const response: BeatDeliveryUploadResponse = {
@@ -116,9 +117,9 @@ async function handleDirectBeatDeliveryUpload(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!hasBlobReadWriteToken()) {
     return NextResponse.json(
-      { error: "Missing BLOB_READ_WRITE_TOKEN. Add it before uploading beat delivery files." },
+      { error: `Missing ${BLOB_READ_WRITE_TOKEN_ENV_NAMES}. Add it before uploading beat delivery files.` },
       { status: 500 }
     );
   }
@@ -139,6 +140,7 @@ export async function POST(request: Request) {
     const jsonResponse = await handleUpload({
       body,
       request,
+      token: getBlobReadWriteToken(),
       onBeforeGenerateToken: async (pathname, clientPayload) => {
         if (!pathname.startsWith("beat-delivery/")) {
           throw new Error("Beat delivery files must be uploaded through the control center.");

@@ -679,11 +679,11 @@ function getUploadErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "Upload failed.";
 
   if (/client token|authorization|unauthorized|forbidden|401|403/i.test(message)) {
-    return "Upload authorization failed. Make sure BLOB_READ_WRITE_TOKEN is set in Vercel Production, then redeploy and sign in again.";
+    return "Upload authorization failed. Make sure BLOB_READ_WRITE_TOKEN or Store_READ_WRITE_TOKEN is set in Vercel Production, then redeploy and sign in again.";
   }
 
   if (/failed to fetch|network|fetch failed|cors/i.test(message)) {
-    return "Upload was blocked before Vercel Blob accepted the file. If this happens in production, re-check the Production BLOB_READ_WRITE_TOKEN is connected to this Vercel project, redeploy, then try again.";
+    return "Upload was blocked before Vercel Blob accepted the file. If this happens in production, re-check the Production BLOB_READ_WRITE_TOKEN or Store_READ_WRITE_TOKEN is connected to this Vercel project, redeploy, then try again.";
   }
 
   return message;

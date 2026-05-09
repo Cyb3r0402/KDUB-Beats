@@ -1,5 +1,6 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
+import { BLOB_READ_WRITE_TOKEN_ENV_NAMES, getBlobReadWriteToken, hasBlobReadWriteToken } from "@/lib/blob-token";
 import {
   MAX_SESSION_UPLOAD_BYTES,
   SESSION_UPLOAD_ALLOWED_CONTENT_TYPES,
@@ -45,9 +46,9 @@ async function verifyPaidPaymentReference(paymentReference: string | undefined) 
 }
 
 export async function POST(request: Request) {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!hasBlobReadWriteToken()) {
     return NextResponse.json(
-      { error: "Missing BLOB_READ_WRITE_TOKEN. Add it before enabling client session uploads." },
+      { error: `Missing ${BLOB_READ_WRITE_TOKEN_ENV_NAMES}. Add it before enabling client session uploads.` },
       { status: 500 }
     );
   }
@@ -58,6 +59,7 @@ export async function POST(request: Request) {
     const jsonResponse = await handleUpload({
       body,
       request,
+      token: getBlobReadWriteToken(),
       onBeforeGenerateToken: async (pathname, clientPayload) => {
         if (!pathname.startsWith("session-uploads/")) {
           throw new Error("Uploads must be sent through the session delivery portal.");

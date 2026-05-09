@@ -1,6 +1,7 @@
 import { put } from "@vercel/blob";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
+import { BLOB_READ_WRITE_TOKEN_ENV_NAMES, getBlobReadWriteToken, hasBlobReadWriteToken } from "@/lib/blob-token";
 import {
   CONTROL_CENTER_COOKIE_NAME,
   isAuthorizedControlCenterSession,
@@ -117,7 +118,7 @@ function getUploadFailureMessage(error: unknown) {
   }
 
   if (/token|unauthorized|forbidden|401|403/i.test(message)) {
-    return "Blob upload authorization failed. Check BLOB_READ_WRITE_TOKEN in Vercel Production, then redeploy.";
+    return `Blob upload authorization failed. Check ${BLOB_READ_WRITE_TOKEN_ENV_NAMES} in Vercel Production, then redeploy.`;
   }
 
   return message;
@@ -163,7 +164,7 @@ async function handleDirectStoreMediaUpload(request: Request) {
       addRandomSuffix: true,
       cacheControlMaxAge: 60 * 60 * 24 * 365,
       contentType,
-      token: process.env.BLOB_READ_WRITE_TOKEN,
+      token: getBlobReadWriteToken(),
     });
 
     const response: StoreMediaUploadResponse = {
@@ -180,9 +181,9 @@ async function handleDirectStoreMediaUpload(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!hasBlobReadWriteToken()) {
     return NextResponse.json(
-      { error: "Missing BLOB_READ_WRITE_TOKEN. Add it before uploading public store media." },
+      { error: `Missing ${BLOB_READ_WRITE_TOKEN_ENV_NAMES}. Add it before uploading public store media.` },
       { status: 500 }
     );
   }
@@ -203,6 +204,7 @@ export async function POST(request: Request) {
     const jsonResponse = await handleUpload({
       body,
       request,
+      token: getBlobReadWriteToken(),
       onBeforeGenerateToken: async (pathname, clientPayload) => {
         if (!pathname.startsWith("store-media/")) {
           throw new Error("Store media must be uploaded through the control center.");

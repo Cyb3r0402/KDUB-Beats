@@ -1,4 +1,5 @@
 import { get, list, put } from "@vercel/blob";
+import { BLOB_READ_WRITE_TOKEN_ENV_NAMES, getBlobReadWriteToken, hasBlobReadWriteToken } from "@/lib/blob-token";
 import { isOrderNotificationConfigured } from "@/lib/order-notifications";
 import type { SessionUploadSubmission, UploadedSessionFile } from "@/lib/session-upload";
 
@@ -16,10 +17,6 @@ export interface SessionUploadSystemStatus {
   blobConfigured: boolean;
   emailConfigured: boolean;
   inboxConfigured: boolean;
-}
-
-function hasBlobReadWriteToken() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
 function sanitizeSegment(value: string) {
@@ -92,6 +89,7 @@ async function readStoredSubmission(pathname: string) {
   const result = await get(pathname, {
     access: "private",
     useCache: false,
+    token: getBlobReadWriteToken(),
   });
 
   if (!result?.stream) {
@@ -114,7 +112,7 @@ export function getSessionUploadSystemStatus(): SessionUploadSystemStatus {
 
 export async function saveSessionSubmission(submission: SessionUploadSubmission) {
   if (!hasBlobReadWriteToken()) {
-    throw new Error("Missing BLOB_READ_WRITE_TOKEN. Add it before receiving client session uploads.");
+    throw new Error(`Missing ${BLOB_READ_WRITE_TOKEN_ENV_NAMES}. Add it before receiving client session uploads.`);
   }
 
   const id = `${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
@@ -138,6 +136,7 @@ export async function saveSessionSubmission(submission: SessionUploadSubmission)
     access: "private",
     addRandomSuffix: false,
     contentType: "application/json",
+    token: getBlobReadWriteToken(),
   });
 
   return record;
@@ -151,6 +150,7 @@ export async function listRecentSessionSubmissions(limit = DEFAULT_SESSION_SUBMI
   const { blobs } = await list({
     prefix: SESSION_SUBMISSIONS_PREFIX,
     limit: MAX_SESSION_SUBMISSION_SCAN,
+    token: getBlobReadWriteToken(),
   });
 
   const recentBlobs = [...blobs]

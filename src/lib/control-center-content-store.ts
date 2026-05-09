@@ -1,4 +1,5 @@
 import { get, put } from "@vercel/blob";
+import { BLOB_READ_WRITE_TOKEN_ENV_NAMES, getBlobReadWriteToken } from "@/lib/blob-token";
 import {
   getDefaultStoreContent,
   normalizeStoreContent,
@@ -13,12 +14,8 @@ interface LoadedPublishedStoreContent {
   source: PublishedContentSource;
 }
 
-function getBlobToken() {
-  return process.env.BLOB_READ_WRITE_TOKEN || "";
-}
-
 export function hasPublishedContentStore() {
-  return Boolean(getBlobToken());
+  return Boolean(getBlobReadWriteToken());
 }
 
 async function streamToText(stream: ReadableStream<Uint8Array>) {
@@ -36,6 +33,7 @@ export async function loadPublishedStoreContentWithSource(): Promise<LoadedPubli
   const blob = await get(CONTENT_PATH, {
     access: "private",
     useCache: false,
+    token: getBlobReadWriteToken(),
   });
 
   if (!blob || blob.statusCode !== 200 || !blob.stream) {
@@ -61,7 +59,7 @@ export async function loadPublishedStoreContent(): Promise<StoreContent> {
 
 export async function savePublishedStoreContent(content: Partial<StoreContent>) {
   if (!hasPublishedContentStore()) {
-    throw new Error("Missing BLOB_READ_WRITE_TOKEN. Add it in Vercel to publish control-center changes to the live site.");
+    throw new Error(`Missing ${BLOB_READ_WRITE_TOKEN_ENV_NAMES}. Add it in Vercel to publish control-center changes to the live site.`);
   }
 
   const normalizedContent = normalizeStoreContent({
@@ -74,6 +72,7 @@ export async function savePublishedStoreContent(content: Partial<StoreContent>) 
     allowOverwrite: true,
     contentType: "application/json",
     cacheControlMaxAge: 60,
+    token: getBlobReadWriteToken(),
   });
 
   return normalizedContent;
