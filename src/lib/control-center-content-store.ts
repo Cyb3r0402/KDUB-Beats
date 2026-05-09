@@ -30,7 +30,7 @@ function getPrivateBlobFailureMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "Unable to publish control-center content.";
 
   if (/access|private|public/i.test(message)) {
-    return `The configured Blob token/store cannot write private control-center metadata. Connect a Private Vercel Blob store and set ${PRIVATE_BLOB_READ_WRITE_TOKEN_ENV_NAMES} in Vercel Production, then redeploy.`;
+    return `The configured private Blob token/store cannot write private control-center metadata. Connect a Private Vercel Blob store and set ${PRIVATE_BLOB_READ_WRITE_TOKEN_ENV_NAMES} in Vercel Production, then redeploy.`;
   }
 
   if (/token|unauthorized|forbidden|401|403/i.test(message)) {
