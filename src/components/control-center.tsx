@@ -5,7 +5,7 @@ import Image from "next/image";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import SampleAudioPlayer from "@/components/sample-audio-player";
-import { formatFileSize } from "@/lib/session-upload";
+import { formatFileSize, MULTIPART_UPLOAD_THRESHOLD_BYTES } from "@/lib/session-upload";
 import type { StripeMode } from "@/lib/stripe";
 import {
   getStoredContentWithSource,
@@ -593,6 +593,8 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
   const [stripeSyncing, setStripeSyncing] = useState(false);
   const [activeUploadProductId, setActiveUploadProductId] = useState<string | null>(null);
   const [activeUploadLabel, setActiveUploadLabel] = useState("");
+  const [activeUploadFileName, setActiveUploadFileName] = useState("");
+  const [activeUploadProgress, setActiveUploadProgress] = useState<number | null>(null);
   const [statusMessage, setStatusMessage] = useState(
     "Beats only go live from uploads made here. Upload the full beat and the control center saves only a protected 20-second preview."
   );
@@ -831,9 +833,13 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
     }
 
     const uploadLabel = getUploadFieldLabel(field);
+    let uploadSucceeded = false;
+
     activeUploadProductIdRef.current = product.id;
     setActiveUploadProductId(product.id);
     setActiveUploadLabel(uploadLabel);
+    setActiveUploadFileName(file.name);
+    setActiveUploadProgress(null);
 
     try {
       if (field === "artwork") {
@@ -888,10 +894,14 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
           access: "public",
           contentType,
           handleUploadUrl: "/api/uploads/beat-delivery",
+          multipart: file.size > MULTIPART_UPLOAD_THRESHOLD_BYTES,
           clientPayload: JSON.stringify({
             originalName: file.name,
             contentType,
           }),
+          onUploadProgress: ({ percentage }) => {
+            setActiveUploadProgress(Math.round(percentage));
+          },
         });
 
         await updateProductAndSave(index, {
@@ -918,6 +928,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
               )}, and the full file was saved for delivery.`
             : `Full beat uploaded once. A protected sample was created at ${preview.previewDuration.toFixed(1)} seconds, and the full file was saved for delivery.`
         );
+        uploadSucceeded = true;
         return;
       }
 
@@ -935,13 +946,19 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
 
       await updateProductAndSave(index, { artwork: artworkUrl });
       setStatusMessage("Artwork loaded and saved. Upload the full beat once to create the protected sample and delivery file.");
+      uploadSucceeded = true;
     } catch (error) {
       setStatusMessage(getUploadErrorMessage(error));
     } finally {
       activeUploadProductIdRef.current = null;
       setActiveUploadProductId(null);
       setActiveUploadLabel("");
-      event.target.value = "";
+      setActiveUploadFileName("");
+      setActiveUploadProgress(null);
+
+      if (uploadSucceeded) {
+        event.target.value = "";
+      }
     }
   }
 
@@ -1676,11 +1693,13 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                         </button>
                         {isUploadingProduct ? (
                           <p className="control-upload-progress" aria-live="polite">
-                            Uploading {activeUploadLabel}. Keep this tab open until the status changes.
+                            Uploading {activeUploadLabel}
+                            {activeUploadFileName ? `: ${activeUploadFileName}` : ""}
+                            {activeUploadProgress !== null ? ` (${activeUploadProgress}%)` : ""}. Keep this tab open until the status changes.
                           </p>
                         ) : null}
                         <p className="control-media-guidance">
-                          Upload the full beat once. The control center automatically creates the protected
+                          Upload the full beat once. The control center automatically creates the protected{" "}
                           {MAX_PROTECTED_SAMPLE_SECONDS}-second preview and saves the original file for delivery.
                         </p>
                         <p className="control-security-note">

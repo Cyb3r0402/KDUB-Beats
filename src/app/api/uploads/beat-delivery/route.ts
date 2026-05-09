@@ -1,3 +1,4 @@
+import { put } from "@vercel/blob";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
 import {
@@ -17,6 +18,13 @@ interface UploadClientPayload {
   contentType?: string;
 }
 
+interface BeatDeliveryUploadResponse {
+  url: string;
+  downloadUrl: string;
+  pathname: string;
+  contentType: string;
+}
+
 function parseClientPayload(clientPayload: string | null): UploadClientPayload {
   if (!clientPayload) {
     return {};
@@ -30,6 +38,83 @@ function parseClientPayload(clientPayload: string | null): UploadClientPayload {
   }
 }
 
+function getControlCenterToken(request: Request) {
+  return request.headers.get("cookie")
+    ?.split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${CONTROL_CENTER_COOKIE_NAME}=`))
+    ?.split("=")[1];
+}
+
+function getUploadFailureMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "Unable to upload the full beat.";
+
+  if (/access|private|public/i.test(message)) {
+    return "Blob upload failed because this token/store does not accept public delivery uploads. Use a Public Vercel Blob store token for beat delivery links, then redeploy.";
+  }
+
+  if (/token|unauthorized|forbidden|401|403/i.test(message)) {
+    return "Blob upload authorization failed. Check BLOB_READ_WRITE_TOKEN in Vercel Production, then redeploy.";
+  }
+
+  return message;
+}
+
+async function handleDirectBeatDeliveryUpload(request: Request) {
+  const formData = await request.formData();
+  const file = formData.get("file");
+  const pathname = String(formData.get("pathname") || "");
+  const originalName = String(formData.get("originalName") || pathname);
+  const requestedContentType = String(formData.get("contentType") || "");
+
+  if (!(file instanceof File)) {
+    return NextResponse.json({ error: "Choose a full beat file before uploading." }, { status: 400 });
+  }
+
+  if (!pathname.startsWith("beat-delivery/")) {
+    return NextResponse.json(
+      { error: "Beat delivery files must be uploaded through the control center." },
+      { status: 400 }
+    );
+  }
+
+  if (file.size > MAX_SESSION_UPLOAD_BYTES) {
+    return NextResponse.json(
+      { error: `The full beat must be ${Math.floor(MAX_SESSION_UPLOAD_BYTES / 1024 / 1024 / 1024)} GB or smaller.` },
+      { status: 400 }
+    );
+  }
+
+  const contentType = getSessionUploadContentType(originalName, requestedContentType || file.type);
+
+  if (!contentType) {
+    return NextResponse.json(
+      { error: "Only audio files such as WAV, AIFF, FLAC, MP3, M4A, AAC, and OGG are allowed." },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const blob = await put(pathname, file, {
+      access: "public",
+      addRandomSuffix: true,
+      contentType,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    });
+
+    const response: BeatDeliveryUploadResponse = {
+      url: blob.url,
+      downloadUrl: blob.downloadUrl,
+      pathname: blob.pathname,
+      contentType: blob.contentType || contentType,
+    };
+
+    return NextResponse.json(response);
+  } catch (error) {
+    return NextResponse.json({ error: getUploadFailureMessage(error) }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
     return NextResponse.json(
@@ -38,14 +123,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const token = request.headers.get("cookie")
-    ?.split(";")
-    .map((cookie) => cookie.trim())
-    .find((cookie) => cookie.startsWith(`${CONTROL_CENTER_COOKIE_NAME}=`))
-    ?.split("=")[1];
+  const token = getControlCenterToken(request);
 
   if (!isAuthorizedControlCenterSession(token)) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  if (request.headers.get("content-type")?.includes("multipart/form-data")) {
+    return handleDirectBeatDeliveryUpload(request);
   }
 
   try {
