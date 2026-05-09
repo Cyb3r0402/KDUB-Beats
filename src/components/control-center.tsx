@@ -559,16 +559,12 @@ function getContentSourceDescription(source: StoredContentSource) {
   return "No published catalog was found yet. Save all changes to create one.";
 }
 
-function getUploadFieldLabel(field: "artwork" | "audioPreview" | "deliveryFile") {
+function getUploadFieldLabel(field: "artwork" | "beatAudio") {
   if (field === "artwork") {
     return "artwork";
   }
 
-  if (field === "audioPreview") {
-    return "protected sample";
-  }
-
-  return "full beat delivery file";
+  return "full beat upload";
 }
 
 function getUploadErrorMessage(error: unknown) {
@@ -797,7 +793,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       productsRef.current = nextProducts;
       return nextProducts;
     });
-    setStatusMessage(category === "beat" ? "New beat added. Upload artwork and a protected sample to publish it." : "New service added. Fill in the details, then save changes.");
+    setStatusMessage(category === "beat" ? "New beat added. Upload artwork and the full beat file to publish it." : "New service added. Fill in the details, then save changes.");
   }
 
   function removeProduct(index: number) {
@@ -812,7 +808,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
   async function handleFileUpload(
     event: ChangeEvent<HTMLInputElement>,
     index: number,
-    field: "artwork" | "audioPreview" | "deliveryFile"
+    field: "artwork" | "beatAudio"
   ) {
     const file = event.target.files?.[0];
 
@@ -849,7 +845,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
         }
       }
 
-      if (field === "audioPreview") {
+      if (field === "beatAudio") {
         const previewTypeIssue = getBeatAudioUploadIssue(file);
 
         if (previewTypeIssue) {
@@ -857,7 +853,14 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
           return;
         }
 
-        setStatusMessage("Creating a protected preview from the strongest part of the beat...");
+        const deliveryIssue = getBeatDeliveryFileIssue(file);
+
+        if (deliveryIssue) {
+          setStatusMessage(deliveryIssue);
+          return;
+        }
+
+        setStatusMessage("Creating a protected 20-second preview from the full beat...");
         const preview = await createBeatPreviewBlob(file);
         const currentProduct = productsRef.current[index] || product;
         const nextName =
@@ -879,6 +882,18 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
           "audio/wav"
         );
 
+        setStatusMessage("Uploading the full beat delivery file...");
+        const contentType = getStoreMediaContentType(file.name, file.type);
+        const blob = await upload(getBeatDeliveryPathname(mediaProduct, file.name), file, {
+          access: "public",
+          contentType,
+          handleUploadUrl: "/api/uploads/beat-delivery",
+          clientPayload: JSON.stringify({
+            originalName: file.name,
+            contentType,
+          }),
+        });
+
         await updateProductAndSave(index, {
           name: nextName,
           genre: currentProduct.genre && currentProduct.genre !== "Genre" ? currentProduct.genre : "Beat",
@@ -891,45 +906,18 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
             : ["Full beat file delivered after purchase", "Non-exclusive beat license"],
           audioPreview: previewUrl,
           previewDuration: preview.previewDuration,
-        });
-        setStatusMessage(
-          preview.sourceDuration > MAX_PROTECTED_SAMPLE_SECONDS
-            ? `Protected ${preview.previewDuration.toFixed(1)}-second sample created from around ${formatDuration(
-                preview.previewStart
-              )}. The beat was saved to the storefront if all required details are ready.`
-            : `Protected sample loaded at ${preview.previewDuration.toFixed(1)} seconds. The beat was saved to the storefront if all required details are ready.`
-        );
-        return;
-      }
-
-      if (field === "deliveryFile") {
-        const deliveryIssue = getBeatDeliveryFileIssue(file);
-
-        if (deliveryIssue) {
-          setStatusMessage(deliveryIssue);
-          return;
-        }
-
-        const currentProduct = productsRef.current[index] || product;
-        setStatusMessage("Uploading the full beat delivery file...");
-        const contentType = file.type || "application/octet-stream";
-        const blob = await upload(getBeatDeliveryPathname(currentProduct, file.name), file, {
-          access: "public",
-          contentType,
-          handleUploadUrl: "/api/uploads/beat-delivery",
-          clientPayload: JSON.stringify({
-            originalName: file.name,
-            contentType,
-          }),
-        });
-
-        await updateProductAndSave(index, {
           deliveryFileUrl: blob.downloadUrl || blob.url,
           deliveryFileName: file.name,
           deliveryFileSize: file.size,
           deliveryFileReady: true,
         });
-        setStatusMessage("Full beat delivery file uploaded and saved. Paid customers will receive this link after checkout.");
+        setStatusMessage(
+          preview.sourceDuration > MAX_PROTECTED_SAMPLE_SECONDS
+            ? `Full beat uploaded once. A protected ${preview.previewDuration.toFixed(1)}-second sample was created from around ${formatDuration(
+                preview.previewStart
+              )}, and the full file was saved for delivery.`
+            : `Full beat uploaded once. A protected sample was created at ${preview.previewDuration.toFixed(1)} seconds, and the full file was saved for delivery.`
+        );
         return;
       }
 
@@ -946,7 +934,7 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       );
 
       await updateProductAndSave(index, { artwork: artworkUrl });
-      setStatusMessage("Artwork loaded and saved. Add a protected sample if this beat is not live yet.");
+      setStatusMessage("Artwork loaded and saved. Upload the full beat once to create the protected sample and delivery file.");
     } catch (error) {
       setStatusMessage(getUploadErrorMessage(error));
     } finally {
@@ -1667,21 +1655,12 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                           />
                         </label>
                         <label>
-                          Beat Preview Source Upload
+                          Full Beat Upload
                           <input
                             type="file"
                             accept=".wav,.wave,.aif,.aiff,.flac,.mp3,.m4a,.aac,.ogg,audio/*"
                             disabled={isUploadingProduct}
-                            onChange={(event) => void handleFileUpload(event, index, "audioPreview")}
-                          />
-                        </label>
-                        <label>
-                          Full Beat Delivery Upload
-                          <input
-                            type="file"
-                            accept=".zip,.wav,.wave,.aif,.aiff,.flac,.mp3,.m4a,.aac,.ogg,audio/*,application/zip"
-                            disabled={isUploadingProduct}
-                            onChange={(event) => void handleFileUpload(event, index, "deliveryFile")}
+                            onChange={(event) => void handleFileUpload(event, index, "beatAudio")}
                           />
                         </label>
                         <button
@@ -1701,8 +1680,8 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
                           </p>
                         ) : null}
                         <p className="control-media-guidance">
-                          Upload a beat source for preview generation, then upload the full delivery
-                          file separately. The public site only plays the protected {MAX_PROTECTED_SAMPLE_SECONDS}-second preview.
+                          Upload the full beat once. The control center automatically creates the protected
+                          {MAX_PROTECTED_SAMPLE_SECONDS}-second preview and saves the original file for delivery.
                         </p>
                         <p className="control-security-note">
                           The public site receives the generated preview clip only. The full beat delivery
