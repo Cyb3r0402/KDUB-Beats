@@ -1,5 +1,9 @@
 import { get, put } from "@vercel/blob";
-import { BLOB_READ_WRITE_TOKEN_ENV_NAMES, getBlobReadWriteToken } from "@/lib/blob-token";
+import {
+  PRIVATE_BLOB_READ_WRITE_TOKEN_ENV_NAMES,
+  getPrivateBlobReadWriteToken,
+  hasPrivateBlobReadWriteToken,
+} from "@/lib/blob-token";
 import {
   getDefaultStoreContent,
   normalizeStoreContent,
@@ -15,7 +19,7 @@ interface LoadedPublishedStoreContent {
 }
 
 export function hasPublishedContentStore() {
-  return Boolean(getBlobReadWriteToken());
+  return hasPrivateBlobReadWriteToken();
 }
 
 async function streamToText(stream: ReadableStream<Uint8Array>) {
@@ -33,7 +37,7 @@ export async function loadPublishedStoreContentWithSource(): Promise<LoadedPubli
   const blob = await get(CONTENT_PATH, {
     access: "private",
     useCache: false,
-    token: getBlobReadWriteToken(),
+    token: getPrivateBlobReadWriteToken(),
   });
 
   if (!blob || blob.statusCode !== 200 || !blob.stream) {
@@ -59,7 +63,7 @@ export async function loadPublishedStoreContent(): Promise<StoreContent> {
 
 export async function savePublishedStoreContent(content: Partial<StoreContent>) {
   if (!hasPublishedContentStore()) {
-    throw new Error(`Missing ${BLOB_READ_WRITE_TOKEN_ENV_NAMES}. Add it in Vercel to publish control-center changes to the live site.`);
+    throw new Error(`Missing ${PRIVATE_BLOB_READ_WRITE_TOKEN_ENV_NAMES}. Keep this connected to a Private Blob store for the control-center catalog metadata.`);
   }
 
   const normalizedContent = normalizeStoreContent({
@@ -72,7 +76,7 @@ export async function savePublishedStoreContent(content: Partial<StoreContent>) 
     allowOverwrite: true,
     contentType: "application/json",
     cacheControlMaxAge: 60,
-    token: getBlobReadWriteToken(),
+    token: getPrivateBlobReadWriteToken(),
   });
 
   return normalizedContent;

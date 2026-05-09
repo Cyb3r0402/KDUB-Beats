@@ -1,5 +1,9 @@
 import { get, list, put } from "@vercel/blob";
-import { BLOB_READ_WRITE_TOKEN_ENV_NAMES, getBlobReadWriteToken, hasBlobReadWriteToken } from "@/lib/blob-token";
+import {
+  PRIVATE_BLOB_READ_WRITE_TOKEN_ENV_NAMES,
+  getPrivateBlobReadWriteToken,
+  hasPrivateBlobReadWriteToken,
+} from "@/lib/blob-token";
 import { isOrderNotificationConfigured } from "@/lib/order-notifications";
 import type { SessionUploadSubmission, UploadedSessionFile } from "@/lib/session-upload";
 
@@ -89,7 +93,7 @@ async function readStoredSubmission(pathname: string) {
   const result = await get(pathname, {
     access: "private",
     useCache: false,
-    token: getBlobReadWriteToken(),
+    token: getPrivateBlobReadWriteToken(),
   });
 
   if (!result?.stream) {
@@ -101,7 +105,7 @@ async function readStoredSubmission(pathname: string) {
 }
 
 export function getSessionUploadSystemStatus(): SessionUploadSystemStatus {
-  const blobConfigured = hasBlobReadWriteToken();
+  const blobConfigured = hasPrivateBlobReadWriteToken();
 
   return {
     blobConfigured,
@@ -111,8 +115,8 @@ export function getSessionUploadSystemStatus(): SessionUploadSystemStatus {
 }
 
 export async function saveSessionSubmission(submission: SessionUploadSubmission) {
-  if (!hasBlobReadWriteToken()) {
-    throw new Error(`Missing ${BLOB_READ_WRITE_TOKEN_ENV_NAMES}. Add it before receiving client session uploads.`);
+  if (!hasPrivateBlobReadWriteToken()) {
+    throw new Error(`Missing ${PRIVATE_BLOB_READ_WRITE_TOKEN_ENV_NAMES}. Keep this connected to a Private Blob store before receiving client session uploads.`);
   }
 
   const id = `${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
@@ -136,21 +140,21 @@ export async function saveSessionSubmission(submission: SessionUploadSubmission)
     access: "private",
     addRandomSuffix: false,
     contentType: "application/json",
-    token: getBlobReadWriteToken(),
+    token: getPrivateBlobReadWriteToken(),
   });
 
   return record;
 }
 
 export async function listRecentSessionSubmissions(limit = DEFAULT_SESSION_SUBMISSION_LIMIT) {
-  if (!hasBlobReadWriteToken()) {
+  if (!hasPrivateBlobReadWriteToken()) {
     return [];
   }
 
   const { blobs } = await list({
     prefix: SESSION_SUBMISSIONS_PREFIX,
     limit: MAX_SESSION_SUBMISSION_SCAN,
-    token: getBlobReadWriteToken(),
+    token: getPrivateBlobReadWriteToken(),
   });
 
   const recentBlobs = [...blobs]

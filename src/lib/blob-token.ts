@@ -1,4 +1,5 @@
 export const BLOB_READ_WRITE_TOKEN_ENV_NAMES = "Store_READ_WRITE_TOKEN or BLOB_READ_WRITE_TOKEN";
+export const PRIVATE_BLOB_READ_WRITE_TOKEN_ENV_NAMES = "BLOB_READ_WRITE_TOKEN";
 
 export function getBlobReadWriteToken() {
   return (
@@ -11,4 +12,12 @@ export function getBlobReadWriteToken() {
 
 export function hasBlobReadWriteToken() {
   return Boolean(getBlobReadWriteToken());
+}
+
+export function getPrivateBlobReadWriteToken() {
+  return process.env.BLOB_READ_WRITE_TOKEN || "";
+}
+
+export function hasPrivateBlobReadWriteToken() {
+  return Boolean(getPrivateBlobReadWriteToken());
 }
