@@ -52,6 +52,10 @@ function getBeatNameFromFileName(fileName: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+const ARTWORK_FRAME_WIDTH = 1920;
+const ARTWORK_FRAME_HEIGHT = 1080;
+const MAX_PREPARED_ARTWORK_BYTES = 4 * 1024 * 1024;
+
 function createNewProduct(category: ProductCategory): StoreProduct {
   const timestamp = Date.now().toString(36);
 
@@ -208,6 +212,106 @@ function getStoreMediaContentType(fileName: string, fallbackType = "") {
   }
 
   return "audio/wav";
+}
+
+function getArtworkUploadFileName(fileName: string) {
+  const safeFile = getSafeUploadFileName(fileName.replace(/\.[a-z0-9]+$/i, ""), "artwork");
+  return `${safeFile}-fitted.jpg`;
+}
+
+function loadArtworkImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = document.createElement("img");
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("This artwork could not be read. Try a PNG, JPG, WEBP, GIF, or AVIF image."));
+    };
+
+    image.src = objectUrl;
+  });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          resolve(blob);
+          return;
+        }
+
+        reject(new Error("This browser could not prepare the artwork image."));
+      },
+      "image/jpeg",
+      quality
+    );
+  });
+}
+
+async function createFittedArtworkUpload(file: File) {
+  const image = await loadArtworkImage(file);
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("This browser could not prepare the artwork image.");
+  }
+
+  canvas.width = ARTWORK_FRAME_WIDTH;
+  canvas.height = ARTWORK_FRAME_HEIGHT;
+
+  const imageWidth = image.naturalWidth || image.width;
+  const imageHeight = image.naturalHeight || image.height;
+
+  if (!imageWidth || !imageHeight) {
+    throw new Error("This artwork image has unreadable dimensions.");
+  }
+
+  context.fillStyle = "#03070d";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const imageRatio = imageWidth / imageHeight;
+  const frameRatio = canvas.width / canvas.height;
+  const coverWidth = imageRatio > frameRatio ? canvas.height * imageRatio : canvas.width;
+  const coverHeight = imageRatio > frameRatio ? canvas.height : canvas.width / imageRatio;
+  const coverX = (canvas.width - coverWidth) / 2;
+  const coverY = (canvas.height - coverHeight) / 2;
+
+  context.save();
+  context.filter = "blur(36px) brightness(0.5) saturate(1.12)";
+  context.drawImage(image, coverX, coverY, coverWidth, coverHeight);
+  context.restore();
+
+  context.fillStyle = "rgba(3, 7, 13, 0.28)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const fitWidth = imageRatio > frameRatio ? canvas.width : canvas.height * imageRatio;
+  const fitHeight = imageRatio > frameRatio ? canvas.width / imageRatio : canvas.height;
+  const fitX = (canvas.width - fitWidth) / 2;
+  const fitY = (canvas.height - fitHeight) / 2;
+
+  context.drawImage(image, fitX, fitY, fitWidth, fitHeight);
+
+  let quality = 0.9;
+  let blob = await canvasToBlob(canvas, quality);
+
+  while (blob.size > MAX_PREPARED_ARTWORK_BYTES && quality > 0.68) {
+    quality -= 0.08;
+    blob = await canvasToBlob(canvas, quality);
+  }
+
+  return {
+    blob,
+    fileName: getArtworkUploadFileName(file.name),
+    contentType: "image/jpeg",
+  };
 }
 
 async function uploadStoreMedia(
@@ -933,19 +1037,21 @@ export default function ControlCenter({ stripeStatus }: ControlCenterProps) {
       }
 
       const currentProduct = productsRef.current[index] || product;
-      const contentType = getStoreMediaContentType(file.name, file.type);
 
-      setStatusMessage("Uploading artwork to the public store media library...");
+      setStatusMessage("Fitting artwork into the storefront rectangle...");
+      const artworkUpload = await createFittedArtworkUpload(file);
+
+      setStatusMessage("Uploading fitted artwork to the public store media library...");
       const artworkUrl = await uploadStoreMedia(
         currentProduct,
         "artwork",
-        file,
-        file.name,
-        contentType
+        artworkUpload.blob,
+        artworkUpload.fileName,
+        artworkUpload.contentType
       );
 
       await updateProductAndSave(index, { artwork: artworkUrl });
-      setStatusMessage("Artwork loaded and saved. Upload the full beat once to create the protected sample and delivery file.");
+      setStatusMessage("Artwork fitted into a 16:9 rectangle and saved. Upload the full beat once to create the protected sample and delivery file.");
       uploadSucceeded = true;
     } catch (error) {
       setStatusMessage(getUploadErrorMessage(error));

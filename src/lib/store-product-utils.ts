@@ -12,6 +12,15 @@ const ACCEPTED_PREVIEW_MIME_TYPES = new Set([
   "audio/ogg",
 ]);
 
+const ACCEPTED_ARTWORK_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "image/gif",
+  "image/avif",
+]);
+
 const ACCEPTED_PREVIEW_EXTENSION_PATTERN = /\.(mp3|m4a|aac|ogg)$/i;
 const ACCEPTED_ARTWORK_EXTENSION_PATTERN = /\.(png|jpe?g|webp|gif|avif)$/i;
 
@@ -61,8 +70,9 @@ export function normalizeProductDraft(product: StoreProduct): StoreProduct {
 
 export function getArtworkFileIssue(file: File) {
   const fileType = cleanValue(file.type).toLowerCase();
+  const fileName = cleanValue(file.name).toLowerCase();
 
-  if (fileType.startsWith("image/") || ACCEPTED_ARTWORK_EXTENSION_PATTERN.test(file.name)) {
+  if (ACCEPTED_ARTWORK_MIME_TYPES.has(fileType) || ACCEPTED_ARTWORK_EXTENSION_PATTERN.test(fileName)) {
     return "";
   }
 

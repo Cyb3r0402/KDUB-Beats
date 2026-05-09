@@ -1020,6 +1020,7 @@ img {
 
 .product-artwork {
   width: 100%;
+  height: clamp(180px, 22vw, 280px);
   aspect-ratio: 16 / 9;
   max-height: 280px;
   object-fit: contain;
@@ -2243,6 +2244,7 @@ img {
 
 .control-preview-image {
   width: 100%;
+  height: clamp(190px, 38vw, 360px);
   max-width: none;
   aspect-ratio: 16 / 9;
   max-height: 360px;
