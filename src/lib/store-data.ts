@@ -7,7 +7,7 @@ export const defaultStoreProducts: StoreProduct[] = [
     name: "Precision Mix",
     category: "service",
     description: "A focused single-song mix built for artists who want clarity, bounce, and a cleaner final record.",
-    price: 89,
+    price: 149,
     badge: "Starter Tier",
     deliverables: [
       "Full stereo mix for one song",
@@ -21,7 +21,7 @@ export const defaultStoreProducts: StoreProduct[] = [
     name: "Mix + Master",
     category: "service",
     description: "The balanced all-in tier for artists who want one clean checkout and a release-ready final song.",
-    price: 179,
+    price: 249,
     badge: "Most Popular",
     deliverables: [
       "Detailed stereo mix",
@@ -35,7 +35,7 @@ export const defaultStoreProducts: StoreProduct[] = [
     name: "Release Priority",
     category: "service",
     description: "A premium finishing tier with extra attention, stronger polish, and priority handling for serious releases.",
-    price: 279,
+    price: 399,
     badge: "Premium Tier",
     deliverables: [
       "Advanced mix detail and automation",
@@ -53,7 +53,7 @@ export const defaultStoreSettings: StoreSettings = {
   storeTitle: "Preview beats and buy the right sound from one polished store.",
   storeDescription:
     "Hear protected beat previews, choose the track that fits, and checkout cleanly without exposing the full beat before purchase.",
-  contactEmail: "kalebmay18@gmail.com",
+  contactEmail: "KDUBinthemix1@gmail.com",
   instagramUrl: "https://instagram.com/",
   siteElements: [
     {

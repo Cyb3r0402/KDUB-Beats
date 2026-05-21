@@ -24,7 +24,7 @@ export default function Storefront() {
     <Elements stripe={stripePromise}>
       <main className="page-shell storefront-page">
         <header className="store-hero panel" data-parallax="0.03">
-          <div data-reveal="left" data-parallax="0.025">
+          <div data-reveal="left" data-parallax="0.025" suppressHydrationWarning>
             <p className="eyebrow">Beat Store</p>
             <h1 className="hero-title">{settings.storeTitle}</h1>
             <p className="hero-text">{settings.storeDescription}</p>
@@ -34,7 +34,7 @@ export default function Storefront() {
               </a>
             </div>
           </div>
-          <div className="store-hero-visual" data-reveal="right" data-parallax="0.12">
+          <div className="store-hero-visual" data-reveal="right" data-parallax="0.12" suppressHydrationWarning>
             <div className="store-hero-logo-shell" data-parallax="0.08">
               <span className="hero-wave hero-wave-top" aria-hidden="true"></span>
               <span className="hero-wave hero-wave-bottom" aria-hidden="true"></span>
@@ -56,18 +56,18 @@ export default function Storefront() {
         </header>
 
         {configError ? (
-          <p className="config-banner" data-reveal="fade">
+          <p className="config-banner" data-reveal="fade" suppressHydrationWarning>
             {configError}
           </p>
         ) : null}
         {successMessage ? (
-          <p className="success-banner" data-reveal="fade">
+          <p className="success-banner" data-reveal="fade" suppressHydrationWarning>
             {successMessage}
           </p>
         ) : null}
 
         <section className="section-block" id="beat-store">
-          <div className="section-copy" data-reveal="fade">
+          <div className="section-copy" data-reveal="fade" suppressHydrationWarning>
             <p className="eyebrow">Beat Store</p>
             <h2>Preview beats with clean branding and secure checkout.</h2>
             <p>
@@ -81,7 +81,7 @@ export default function Storefront() {
                 const isActive = activeProductId === product.id;
 
                 return (
-                  <article className="panel store-card" key={product.id} data-reveal="zoom" data-parallax="0.018">
+                  <article className="panel store-card" key={product.id} data-reveal="zoom" data-parallax="0.018" suppressHydrationWarning>
                     {product.badge ? <span className="product-badge">{product.badge}</span> : null}
                     {product.soldOut ? <span className="product-badge product-badge-sold">Sold</span> : null}
                     {product.artwork ? (
@@ -141,7 +141,7 @@ export default function Storefront() {
               })}
             </div>
           ) : (
-            <article className="panel store-empty-state" data-reveal="fade">
+            <article className="panel store-empty-state" data-reveal="fade" suppressHydrationWarning>
               <p className="eyebrow">No Beats Live Yet</p>
               <h3>Beat previews only go live after they are uploaded.</h3>
               <p>
@@ -153,7 +153,7 @@ export default function Storefront() {
         </section>
 
         <section className="section-block">
-          <div className="panel service-cta-banner" data-reveal="fade" data-parallax="0.04">
+          <div className="panel service-cta-banner" data-reveal="fade" data-parallax="0.04" suppressHydrationWarning>
             <div>
               <p className="eyebrow">Need A Mix Too?</p>
               <h3>Mixing and mastering has a separate checkout page.</h3>

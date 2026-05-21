@@ -162,7 +162,12 @@ export async function getStoredContentWithSource(): Promise<StoredContentLoadRes
   ]);
 
   if (publishedContent?.source === "blob") {
-    await saveLocalStoreContent(publishedContent.content).catch(() => undefined);
+    // Only overwrite local content if local content doesn't exist yet.
+    // This prevents deleting drafts when the app reloads.
+    if (!localContent) {
+      await saveLocalStoreContent(publishedContent.content).catch(() => undefined);
+    }
+    
     return {
       content: publishedContent.content,
       source: "published",

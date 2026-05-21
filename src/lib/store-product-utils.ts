@@ -57,7 +57,7 @@ export function normalizeProductDraft(product: StoreProduct): StoreProduct {
     soldOut: product.soldOut === true,
     price:
       isUploadedBeat && (!Number.isFinite(product.price) || Number(product.price) < MIN_CHECKOUT_PRICE)
-        ? 29.99
+        ? 39.99
         : Number.isFinite(product.price)
           ? Number(product.price)
           : 0,

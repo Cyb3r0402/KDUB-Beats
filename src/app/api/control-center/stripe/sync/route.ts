@@ -1,185 +1,128 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  CONTROL_CENTER_COOKIE_NAME,
-  isAuthorizedControlCenterSession,
-} from "@/lib/control-center-auth";
 import { stripe } from "@/lib/stripe";
+import { loadPublishedStoreContent, savePublishedStoreContent } from "@/lib/control-center-content-store";
+import { normalizeProductDraft } from "@/lib/store-product-utils";
 import type { StoreProduct } from "@/types/store";
-
-function normalizeMetadataValue(value: string | undefined) {
-  return (value || "").slice(0, 500);
-}
-
-function isMissingStripeResource(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "resource_missing"
-  );
-}
-
-async function syncProduct(product: StoreProduct) {
-  if (!stripe) {
-    throw new Error("Missing Stripe keys. Add STRIPE_SECRET_KEY and NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY first.");
-  }
-
-  const amount = Math.round(Number(product.price) * 100);
-
-  if (!product.name.trim()) {
-    throw new Error("Every product needs a name before it can sync to Stripe.");
-  }
-
-  if (!amount || amount < 50) {
-    throw new Error(`${product.name} needs a price of at least $0.50 before it can sync to Stripe.`);
-  }
-
-  const metadata = {
-    internalProductId: normalizeMetadataValue(product.id),
-    slug: normalizeMetadataValue(product.slug),
-    category: normalizeMetadataValue(product.category),
-    badge: normalizeMetadataValue(product.badge),
-    genre: normalizeMetadataValue(product.genre),
-  };
-
-  let stripeProduct = null;
-
-  if (product.stripeProductId && product.stripeProductId.startsWith("prod_")) {
-    try {
-      stripeProduct = await stripe.products.update(product.stripeProductId, {
-        name: product.name,
-        description: product.description,
-        metadata,
-        active: true,
-      });
-    } catch (error) {
-      if (!isMissingStripeResource(error)) {
-        throw error;
-      }
-    }
-  }
-
-  if (!stripeProduct) {
-    stripeProduct = await stripe.products.create({
-      name: product.name,
-      description: product.description,
-      metadata,
-      active: true,
-    });
-  }
-
-  let stripePriceId = product.stripePriceId;
-
-  if (stripePriceId?.startsWith("price_")) {
-    let existingPrice = null;
-
-    try {
-      existingPrice = await stripe.prices.retrieve(stripePriceId);
-    } catch (error) {
-      if (!isMissingStripeResource(error)) {
-        throw error;
-      }
-    }
-
-    if (existingPrice) {
-      if (
-        existingPrice.active &&
-        existingPrice.currency === "usd" &&
-        existingPrice.unit_amount === amount
-      ) {
-        return {
-          ...product,
-          stripeProductId: stripeProduct.id,
-          stripePriceId: existingPrice.id,
-        };
-      }
-
-      if (existingPrice.active) {
-        await stripe.prices.update(existingPrice.id, {
-          active: false,
-        });
-      }
-    }
-  }
-
-  const nextPrice = await stripe.prices.create({
-    product: stripeProduct.id,
-    unit_amount: amount,
-    currency: "usd",
-    metadata,
-  });
-
-  return {
-    ...product,
-    stripeProductId: stripeProduct.id,
-    stripePriceId: nextPrice.id,
-  };
-}
-
-function canAttemptStripeSync(product: StoreProduct) {
-  const amount = Math.round(Number(product.price) * 100);
-
-  return Boolean(product.name.trim() && amount >= 50);
-}
+import Stripe from "stripe";
 
 export async function POST(request: NextRequest) {
-  const token = request.cookies.get(CONTROL_CENTER_COOKIE_NAME)?.value;
-
-  if (!isAuthorizedControlCenterSession(token)) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
-  try {
-    const payload = await request.json();
-    const products = Array.isArray(payload.products) ? (payload.products as StoreProduct[]) : [];
-
-    if (!products.length) {
-      return NextResponse.json({ error: "No products were provided for Stripe sync." }, { status: 400 });
-    }
-
-    const skippedProducts = products.filter((product) => !canAttemptStripeSync(product));
-    const syncableProducts = products.filter(canAttemptStripeSync);
-
-    if (!syncableProducts.length) {
-      return NextResponse.json(
-        { error: "No products had both a name and a price of at least $0.50." },
-        { status: 400 }
-      );
-    }
-
-    const syncResults = await Promise.allSettled(syncableProducts.map(syncProduct));
-    const syncedProducts = syncResults.flatMap((result) =>
-      result.status === "fulfilled" ? [result.value] : []
+  if (!stripe) {
+    return NextResponse.json(
+      { error: "Stripe is not configured. Add STRIPE_SECRET_KEY to your environment variables." },
+      { status: 500 }
     );
-    const failedProducts = syncResults
-      .map((result, index) => {
-        if (result.status === "fulfilled") {
-          return null;
-        }
-
-        const product = syncableProducts[index];
-        return {
-          id: product.id,
-          name: product.name,
-          error: result.reason instanceof Error ? result.reason.message : "Stripe sync failed.",
-        };
-      })
-      .filter(Boolean);
-
-    return NextResponse.json({
-      products: syncedProducts,
-      syncedCount: syncedProducts.length,
-      skippedCount: skippedProducts.length,
-      failedCount: failedProducts.length,
-      skippedProducts: skippedProducts.map((product) => ({
-        id: product.id,
-        name: product.name,
-        reason: "Add a product name and set a price of at least $0.50.",
-      })),
-      failedProducts,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Stripe sync failed.";
-    return NextResponse.json({ error: message }, { status: 500 });
   }
+
+  const { products: incomingProducts } = (await request.json()) as { products: StoreProduct[] };
+
+  if (!Array.isArray(incomingProducts)) {
+    return NextResponse.json({ error: "Invalid request body. Expected an array of products." }, { status: 400 });
+  }
+
+  const updatedProducts: StoreProduct[] = [];
+  const failedProducts: { name: string; error: string }[] = [];
+  let syncedCount = 0;
+  let skippedCount = 0;
+
+  for (const product of incomingProducts) {
+    const normalizedProduct = normalizeProductDraft(product); // Ensure product is normalized
+    const { id, name, description, price, category, stripeProductId, stripePriceId } = normalizedProduct;
+
+    // Skip products that don't have a name or a valid price for Stripe
+    if (!name || price < 0.5) { // Stripe's minimum charge amount is 0.50 USD
+      skippedCount++;
+      updatedProducts.push(normalizedProduct); // Keep skipped products in the list
+      continue;
+    }
+
+    try {
+      let currentStripeProductId = stripeProductId;
+      let currentStripePriceId = stripePriceId;
+
+      // 1. Ensure Stripe Product exists
+      if (!currentStripeProductId) {
+        const stripeProduct = await stripe.products.create({
+          name: name,
+          description: description || undefined,
+          metadata: {
+            productId: id,
+            category: category,
+          },
+        });
+        currentStripeProductId = stripeProduct.id;
+      } else {
+        // Update existing Stripe Product if name or description changed
+        const existingStripeProduct = await stripe.products.retrieve(currentStripeProductId);
+        if (existingStripeProduct.name !== name || existingStripeProduct.description !== description) {
+          await stripe.products.update(currentStripeProductId, {
+            name: name,
+            description: description || undefined,
+          });
+        }
+      }
+
+      // 2. Ensure Stripe Price exists and matches the current product price
+      let priceNeedsUpdate = false;
+      if (currentStripePriceId) {
+        try {
+          const existingStripePrice = await stripe.prices.retrieve(currentStripePriceId);
+          // Stripe stores amount in cents
+          if (existingStripePrice.unit_amount !== Math.round(price * 100) || existingStripePrice.currency !== "usd") {
+            // Deactivate old price if it doesn't match the current product price
+            await stripe.prices.update(currentStripePriceId, { active: false });
+            priceNeedsUpdate = true;
+          } else {
+            // Price matches, ensure it's active
+            if (!existingStripePrice.active) {
+              await stripe.prices.update(currentStripePriceId, { active: true });
+            }
+          }
+        } catch (priceError) {
+          // If price ID is invalid or not found, create a new one
+          if (priceError instanceof Stripe.errors.StripeError && priceError.code === "resource_missing") {
+            priceNeedsUpdate = true;
+          } else {
+            throw priceError; // Re-throw other Stripe errors
+          }
+        }
+      } else {
+        priceNeedsUpdate = true;
+      }
+
+      if (priceNeedsUpdate) {
+        const stripePrice = await stripe.prices.create({
+          unit_amount: Math.round(price * 100), // amount in cents
+          currency: "usd",
+          product: currentStripeProductId,
+          active: true,
+          metadata: { productId: id, productName: name, category: category },
+        });
+        currentStripePriceId = stripePrice.id;
+      }
+
+      updatedProducts.push({ ...normalizedProduct, stripeProductId: currentStripeProductId, stripePriceId: currentStripePriceId });
+      syncedCount++;
+
+    } catch (error) {
+      console.error(`Failed to sync product ${name} (${id}) to Stripe:`, error);
+      failedProducts.push({ name: name, error: error instanceof Error ? error.message : "Unknown error" });
+      updatedProducts.push(normalizedProduct); // Keep failed products in the list
+    }
+  }
+
+  // Save the updated products back to Vercel Blob
+  const currentContent = await loadPublishedStoreContent();
+  const newContent = {
+    ...currentContent,
+    products: updatedProducts,
+  };
+  await savePublishedStoreContent(newContent);
+
+  return NextResponse.json({
+    products: updatedProducts,
+    syncedCount,
+    skippedCount,
+    failedCount: failedProducts.length,
+    failedProducts,
+  });
 }

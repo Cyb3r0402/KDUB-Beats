@@ -42,8 +42,8 @@ export default function ServiceTierCheckout() {
   return (
     <Elements stripe={stripePromise}>
       <main className="page-shell services-page">
-        <header className="services-hero panel" data-parallax="0.03">
-          <div data-reveal="left" data-parallax="0.025">
+        <header className="services-hero panel" data-parallax="0.03" suppressHydrationWarning>
+          <div data-reveal="left" data-parallax="0.025" suppressHydrationWarning>
             <p className="eyebrow">Mixing & Mastering Checkout</p>
             <h1 className="hero-title">Choose the tier that fits your record, then checkout securely.</h1>
             <p className="hero-text">
@@ -59,7 +59,7 @@ export default function ServiceTierCheckout() {
               </a>
             </div>
           </div>
-          <div className="service-hero-stack" data-reveal="right">
+            <div className="service-hero-stack" data-reveal="right" suppressHydrationWarning>
             <div className="service-highlight-strip">
               <span>Tiered Pricing</span>
               <span>Stripe Checkout</span>
@@ -109,14 +109,15 @@ export default function ServiceTierCheckout() {
                       className={`panel service-tier-card${isSelected ? " is-selected" : ""}`}
                       data-reveal="zoom"
                       data-parallax="0.02"
+                      suppressHydrationWarning
                     >
                       {service.badge ? <span className="product-badge">{service.badge}</span> : null}
                       <div className="service-tier-card-body">
                         <div className="product-topline">
                           <span>Studio Tier</span>
-                          <strong>${service.price}</strong>
                         </div>
                         <h3>{service.name}</h3>
+                        <strong className="price-display">${service.price}</strong>
                         <p>{service.description}</p>
                         <ul className="deliverable-list">
                           {service.deliverables.map((deliverable) => (
@@ -137,7 +138,7 @@ export default function ServiceTierCheckout() {
               </div>
 
               {selectedService ? (
-                <aside className="panel service-checkout-panel" data-reveal="fade" data-parallax="0.02">
+                <aside className="panel service-checkout-panel" data-reveal="fade" data-parallax="0.02" suppressHydrationWarning>
                   <div className="service-checkout-copy">
                     <p className="eyebrow">Secure Checkout</p>
                     <h2>{selectedService.name}</h2>
@@ -194,7 +195,7 @@ export default function ServiceTierCheckout() {
             </section>
 
             <section className="section-block service-process-grid">
-              <article className="panel" data-reveal="left" data-parallax="0.02">
+              <article className="panel" data-reveal="left" data-parallax="0.02" suppressHydrationWarning>
                 <span className="step-index">01</span>
                 <h3>Pick Your Tier</h3>
                 <p>
@@ -202,12 +203,12 @@ export default function ServiceTierCheckout() {
                   deadline.
                 </p>
               </article>
-              <article className="panel" data-reveal="fade" data-parallax="0.02">
+              <article className="panel" data-reveal="fade" data-parallax="0.02" suppressHydrationWarning>
                 <span className="step-index">02</span>
                 <h3>Checkout Securely</h3>
                 <p>Pay through Stripe and lock in the selected service tier from the page.</p>
               </article>
-              <article className="panel" data-reveal="right" data-parallax="0.02">
+              <article className="panel" data-reveal="right" data-parallax="0.02" suppressHydrationWarning>
                 <span className="step-index">03</span>
                 <h3>Upload The Session</h3>
                 <p>

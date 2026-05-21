@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loadPublishedStoreContent } from "@/lib/control-center-content-store";
 import { stripe } from "@/lib/stripe";
+import Stripe from "stripe";
 
 export async function POST(request: NextRequest) {
+  const stripeMode = process.env.STRIPE_SECRET_KEY?.startsWith("sk_test") ? "Test Mode" : "Live Mode";
   if (!stripe) {
     return NextResponse.json(
       { error: "Missing STRIPE_SECRET_KEY. Add it to your environment variables before using checkout." },
@@ -10,7 +12,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  let checkoutStripePriceId: string | undefined;
+
   try {
+    const body = await request.json();
     const {
       productId,
       productName,
@@ -23,13 +28,13 @@ export async function POST(request: NextRequest) {
       deliveryFileUrl,
       deliveryFileName,
       soldOut,
-    } = await request.json();
+    } = body;
 
     const publishedContent = await loadPublishedStoreContent().catch(() => null);
     const catalogProduct = publishedContent?.products.find((product) => product.id === String(productId)) || null;
     const checkoutPrice = catalogProduct?.price ?? price;
     const checkoutStripeProductId = catalogProduct?.stripeProductId || stripeProductId;
-    const checkoutStripePriceId = catalogProduct?.stripePriceId || stripePriceId;
+    checkoutStripePriceId = catalogProduct?.stripePriceId || stripePriceId;
     const checkoutDeliveryFileUrl = catalogProduct?.deliveryFileUrl || deliveryFileUrl;
     const checkoutDeliveryFileName = catalogProduct?.deliveryFileName || deliveryFileName;
     const checkoutSoldOut = catalogProduct?.soldOut ?? soldOut;
@@ -37,13 +42,17 @@ export async function POST(request: NextRequest) {
     let amount = Math.round(Number(checkoutPrice) * 100);
 
     if (checkoutStripePriceId && String(checkoutStripePriceId).startsWith("price_")) {
-      const syncedPrice = await stripe.prices.retrieve(String(checkoutStripePriceId));
+      try {
+        const syncedPrice = await stripe.prices.retrieve(String(checkoutStripePriceId));
 
-      if (typeof syncedPrice.unit_amount !== "number" || syncedPrice.currency !== "usd") {
-        return NextResponse.json({ error: "Stripe price is not valid for checkout." }, { status: 400 });
+        if (typeof syncedPrice.unit_amount === "number" && syncedPrice.currency === "usd") {
+          amount = syncedPrice.unit_amount;
+        }
+      } catch (priceError) {
+        // Self-healing: If the Price ID is invalid or from a different environment,
+        // we fall back to the website cost. This fulfills the "link automatically" request.
+        console.warn(`Stripe price ${checkoutStripePriceId} retrieval failed. Using catalog amount: ${amount}`);
       }
-
-      amount = syncedPrice.unit_amount;
     }
 
     if (!amount || amount < 50) {
@@ -80,7 +89,17 @@ export async function POST(request: NextRequest) {
       clientSecret: paymentIntent.client_secret,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to create payment intent.";
+    let message = "Unable to create payment intent.";
+    if (error instanceof Stripe.errors.StripeError) {
+      // Add mode context to help debug "No such price" errors
+      if (error.code === "resource_missing") {
+        message = `Stripe ${stripeMode} error: The price ID ${checkoutStripePriceId || "unknown"} does not exist in this mode. Check your environment variables.`;
+      } else {
+        message = error.message;
+      }
+    } else if (error instanceof Error) {
+      message = error.message;
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

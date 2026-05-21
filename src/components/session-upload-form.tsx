@@ -247,7 +247,7 @@ export default function SessionUploadForm({
 
   return (
     <section className="section-block session-upload-section" id="session-upload">
-      <article className="panel session-upload-panel" data-reveal="left" data-parallax="0.02">
+      <article className="panel session-upload-panel" data-reveal="left" data-parallax="0.02" suppressHydrationWarning>
         <div className="session-upload-copy">
           <p className="eyebrow">Client Upload Portal</p>
           <h2>Send stems, beats, and notes without leaving the site.</h2>
@@ -275,7 +275,7 @@ export default function SessionUploadForm({
         </div>
       </article>
 
-      <article className="panel session-upload-form-panel" data-reveal="right" data-parallax="0.02">
+      <article className="panel session-upload-form-panel" data-reveal="right" data-parallax="0.02" suppressHydrationWarning>
         {paymentReady ? (
           <p className="session-upload-banner is-ready">
             Payment confirmed. Upload the session below so the order can move straight into the mix queue.

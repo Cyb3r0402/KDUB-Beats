@@ -4,7 +4,7 @@ import { stripe } from "@/lib/stripe";
 import type { SessionUploadSubmission } from "@/lib/session-upload";
 import { formatFileSize } from "@/lib/session-upload";
 
-const DEFAULT_ORDER_NOTIFICATION_TO = "kalebmay18@gmail.com";
+const DEFAULT_ORDER_NOTIFICATION_TO = "KDUBinthemix1@gmail.com";
 
 function getSmtpPort() {
   const parsed = Number(process.env.SMTP_PORT || "465");

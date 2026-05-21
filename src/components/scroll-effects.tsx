@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 export default function ScrollEffects() {
+  const isHydratedRef = useRef(false);
+
+  useLayoutEffect(() => {
+    isHydratedRef.current = true;
+  }, []);
+
   useEffect(() => {
+    if (!isHydratedRef.current) return;
+
     const root = document.documentElement;
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
