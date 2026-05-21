@@ -79,6 +79,7 @@ export async function POST(request: Request) {
         }
 
         return {
+          access: "public",
           allowedContentTypes: [...SESSION_UPLOAD_ALLOWED_CONTENT_TYPES],
           maximumSizeInBytes: MAX_SESSION_UPLOAD_BYTES,
           addRandomSuffix: true,
